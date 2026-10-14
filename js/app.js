@@ -173,7 +173,7 @@
         }, 2000);
       }
     }
-    if (screen.id === "scan" && E.state.ui.scanMode === "barcode" && !E.state.ui.analyzing) {
+    if (screen.id === "scan" && E.state.ui.scanMode === "barcode" && !E.state.ui.analyzing && E.isPro() && !E.state.flags.scanLimit) {
       E._bar = setTimeout(function () {
         if (E.current().id === "scan" && E.state.ui.scanMode === "barcode") actions.shutter();
       }, 1700);
@@ -260,14 +260,46 @@
     E.state.nav.stack.push({ id: id, params: params || {}, transition: transition || "right" });
     E.render({ animate: true, transition: transition || "right" });
   }
+  const ACCOUNT_SCREENS = { communities: 1, reminders: 1, social: 1, subscription: 1, privacy: 1 };
+  function guestInApp() {
+    const u = E.state.user;
+    return !!(u && u.isGuest && u.onboarded);
+  }
+  function askEmailFor(feature) {
+    E.state.ui.pendingFeature = feature || null;
+    E.state.ui.authError = "";
+    E.state.modal = null;
+    push("claim-email");
+  }
+  function resumePendingFeature() {
+    const p = E.state.ui.pendingFeature;
+    if (!p) return false;
+    E.state.ui.pendingFeature = null;
+    if (p.type === "tab") {
+      const map = { home: "home", diary: "diary", chat: "messages", profile: "profile" };
+      E.state.nav = { tab: p.id, stack: [{ id: map[p.id] || "home", transition: "fade" }] };
+      return true;
+    }
+    if (p.type === "paywall") {
+      E.state.nav = { tab: "home", stack: [{ id: "home" }] };
+      E.state.ui.selectedPlan = (E.state.pendingCheckout && E.state.pendingCheckout.plan) || E.state.ui.selectedPlan || "yearly";
+      E.state.pendingCheckout = null;
+      E.state.modal = { id: "paywall" };
+      return true;
+    }
+    if (p.type === "screen") {
+      E.state.nav = { tab: "profile", stack: [{ id: "profile" }, { id: p.id, transition: "right" }] };
+      return true;
+    }
+    return false;
+  }
   function pop() {
     if (E.state.nav.stack.length > 1) E.state.nav.stack.pop();
     E.render({ animate: true, transition: "fade" });
   }
   function goTab(tab) {
-    if (tab === "chat" && E.state.user.isGuest) {
-      toast("Create a free account to message people.", "err");
-      push("register", {}, "right");
+    if (tab === "chat" && guestInApp()) {
+      askEmailFor({ type: "tab", id: "chat" });
       return;
     }
     const map = { home: "home", diary: "diary", chat: "messages", profile: "profile" };
@@ -279,7 +311,26 @@
     E.state.modal = Object.assign({ id: id }, extra || {});
     E.render({ animate: false, keepScroll: true });
   }
-  function lockedScan() { return E.state.flags.scanLimit && !E.isPro(); }
+  function lockedScan() { return !E.isPro() || !!E.state.flags.scanLimit; }
+  function resumeGate() {
+    const kind = E.state.ui.pendingGate;
+    if (!kind) return;
+    const scanKind = kind === "shutter" || kind === "describe" || kind === "barcode";
+    if (scanKind && lockedScan()) return;
+    if (!scanKind && !E.isPro()) return;
+    if ((kind === "shutter" || kind === "describe") && !E.state.user.ai) {
+      openModal("ai-consent");
+      return;
+    }
+    E.state.ui.pendingGate = null;
+    if (kind === "shutter" || kind === "barcode") actions.shutter();
+    else if (kind === "describe") actions["describe-submit"]();
+    else if (kind === "share") actions["share-meal"]({ dataset: { id: E.state.ui.shareMealId } });
+    else if (kind === "photo") actions["add-photo"]();
+    else if (kind === "discover") { E.state.ui.chatTab = "discover"; E.render({ animate: false, keepScroll: true }); }
+    else if (kind === "save") { if (E.state.scan) { E.state.scan.saveLater = true; E.render({ animate: false, keepScroll: true }); } }
+    else if (kind === "measure") actions["save-measure"]();
+  }
 
   function finishOnboarding() {
     const ob = E.state.onboarding;
@@ -352,6 +403,8 @@
     const ob = E.state.onboarding;
     if (key === "email") ui.email = val;
     else if (key === "password") ui.password = val;
+    else if (key === "currentPassword") ui.currentPassword = val;
+    else if (key === "newPassword") ui.newPassword = val;
     else if (key === "ob-name") ob.name = val;
     else if (key === "newEmail") ui.newEmail = val;
     else if (key === "describe") ui.describeText = val;
@@ -397,7 +450,7 @@
     else if (key === "mw") ui.measureWaist = val;
     else if (key === "mh") ui.measureHips = val;
     else if (key === "mc") ui.measureChest = val;
-    const live = { email: 1, password: 1, "ob-name": 1, "chat-q": 1, "disc-q": 1, "comm-q": 1, bio: 1, "city-q": 1, "group-name": 1, "delete-ack": 1, "new-comm": 1 };
+    const live = { email: 1, password: 1, currentPassword: 1, newPassword: 1, "ob-name": 1, "chat-q": 1, "disc-q": 1, "comm-q": 1, bio: 1, "city-q": 1, "group-name": 1, "delete-ack": 1, "new-comm": 1 };
     if (live[key]) E.render({ animate: false, keepScroll: true });
   }
 
@@ -429,7 +482,10 @@
 
   let lastScan = null;
   async function runScan(builder) {
-    if (lockedScan()) { openModal("paywall"); return; }
+    const mode = E.state.ui.scanMode || "photo";
+    const kind = mode === "describe" ? "describe" : mode === "barcode" ? "barcode" : "shutter";
+    if (lockedScan()) { E.state.ui.pendingGate = kind; openModal("paywall"); return; }
+    if (kind !== "barcode" && !E.state.user.ai) { E.state.ui.pendingGate = kind; openModal("ai-consent"); return; }
     lastScan = builder;
     E.state.ui.scanError = "";
     E.state.ui.scanProgress = "Compressing photo…";
@@ -460,15 +516,93 @@
     return true;
   }
 
+  function prettyEmailName(email) {
+    return String(email || "").split("@")[0].replace(/[.\-_]/g, " ").replace(/\b\w/g, function (s) { return s.toUpperCase(); }) || "Friend";
+  }
+  function beginOtp(purpose, email) {
+    const ui = E.state.ui;
+    ui.otpPurpose = purpose;
+    ui.loginEmail = email;
+    if (purpose === "reset") ui.resetEmail = email;
+    ui.otp = ["", "", "", "", "", ""];
+    ui.resendAt = Date.now() + 30000;
+    ui.otpExpiresAt = Date.now() + 60000;
+    ui.authError = "";
+    ui.editingEmail = false;
+    ui.busy = null;
+  }
+  function enterAccount(email) {
+    const pending = E.state.pendingCheckout;
+    const feature = E.state.ui.pendingFeature;
+    const gate = E.state.ui.pendingGate;
+    const key = E.demoAccounts[email];
+    const guestKeep = E.state.user && E.state.user.isGuest && E.state.user.onboarded && (!key || key === "custom");
+    if (guestKeep) {
+      const u = E.state.user;
+      u.isGuest = false;
+      u.email = email;
+      u.isEmailVerified = true;
+      if (!u.name || u.name === "Guest") u.name = prettyEmailName(email);
+      E.demoAccounts[email] = "custom";
+      if (!feature) E.state.nav = { tab: "home", stack: [{ id: "home" }] };
+    } else if (key && key !== "custom") {
+      E.state = E.createState(key);
+      E.state.user.email = email;
+    } else {
+      E.state = E.createState("fresh");
+      E.state.user.email = email;
+      E.state.user.name = prettyEmailName(email);
+      E.state.user.isEmailVerified = true;
+      E.state.onboarding.name = prettyEmailName(email);
+      E.state.nav = { tab: "home", stack: [{ id: "onboarding" }] };
+      E.demoAccounts[email] = "custom";
+    }
+    if (pending) E.state.pendingCheckout = pending;
+    if (feature) E.state.ui.pendingFeature = feature;
+    if (gate) E.state.ui.pendingGate = gate;
+    if (key === "sam") return;
+    if (feature && resumePendingFeature()) {
+      if (E.state.modal && E.state.modal.id === "paywall") toast("Pick up Pro where you left it");
+      return;
+    }
+    if (resumePaywall()) toast("Pick up Pro where you left it");
+  }
+
   const actions = {
     back: function () {
       if (E.state.modal) { E.state.modal = null; E.render({ animate: false, keepScroll: true }); return; }
       pop();
     },
     go: function (el) {
+      const screen = el.dataset.screen;
+      if (guestInApp() && ACCOUNT_SCREENS[screen]) {
+        askEmailFor({ type: "screen", id: screen });
+        return;
+      }
       const params = {};
       if (el.dataset.id) params.id = el.dataset.id;
-      push(el.dataset.screen, params, "right");
+      push(screen, params, "right");
+    },
+    "ask-email": function (el) {
+      const feature = el && el.dataset.feature === "chat" ? { type: "tab", id: "chat" } : null;
+      if (!guestInApp()) {
+        if (feature) goTab("chat");
+        return;
+      }
+      askEmailFor(feature);
+    },
+    "send-claim-code": async function () {
+      const ui = E.state.ui;
+      const email = (ui.email || "").trim().toLowerCase();
+      if (!E.validEmail(email)) { ui.authError = "Enter a valid email address."; E.render({ animate: false, keepScroll: true }); return; }
+      ui.busy = "claim"; ui.authError = "";
+      E.render({ animate: false, keepScroll: true });
+      await sleep(700);
+      const feature = ui.pendingFeature;
+      beginOtp("claim", email);
+      ui.pendingFeature = feature;
+      push("verify");
+      toast("Code sent");
     },
     tab: function (el) { goTab(el.dataset.tab); },
     "guest-start": function () {
@@ -481,33 +615,30 @@
       E.state.ui.showPassword = !E.state.ui.showPassword;
       E.render({ animate: false, keepScroll: true });
     },
+    "send-login-code": async function () {
+      const ui = E.state.ui;
+      const email = (ui.email || "").trim().toLowerCase();
+      if (!E.validEmail(email)) { ui.authError = "Enter a valid email address."; E.render({ animate: false, keepScroll: true }); return; }
+      ui.busy = "code"; ui.authError = "";
+      E.render({ animate: false, keepScroll: true });
+      await sleep(700);
+      beginOtp("login", email);
+      E.state.nav = { tab: "home", stack: [{ id: "verify" }] };
+      toast("Code sent");
+      E.render({ animate: true, transition: "up" });
+    },
     login: async function () {
       const ui = E.state.ui;
-      if (!E.validEmail(ui.email)) { ui.authError = "Enter a valid email address."; E.render({ animate: false, keepScroll: true }); return; }
-      if (ui.password === "wrong") { ui.authError = "That password doesn't match. Try again."; E.render({ animate: false, keepScroll: true }); return; }
+      const email = (ui.email || "").trim().toLowerCase();
+      if (!E.validEmail(email)) { ui.authError = "Enter a valid email address."; E.render({ animate: false, keepScroll: true }); return; }
+      if (!E.demoAccounts[email]) { ui.authError = "No account for that email. Create one, or use a code."; E.render({ animate: false, keepScroll: true }); return; }
+      if (!E.demoPasswords[email]) { ui.authError = "This email uses a code. Email me a code, or create a password after login."; E.render({ animate: false, keepScroll: true }); return; }
+      if (E.demoPasswords[email] !== ui.password) { ui.authError = "That password doesn't match."; E.render({ animate: false, keepScroll: true }); return; }
       ui.busy = "login"; ui.authError = "";
       E.render({ animate: false, keepScroll: true });
       await sleep(800);
-      const email = ui.email.trim().toLowerCase();
-      const map = { "priya@eat.ai": "priya", "rahul@eat.ai": "rahul", "sam@demo.app": "sam", "aisha@eat.ai": "aisha" };
-      const pending = E.state.pendingCheckout;
-      if (map[email]) E.state = E.createState(map[email]);
-      else if (email.indexOf("unverified") >= 0) {
-        E.state = E.createState("sam");
-        E.state.user.email = email;
-        E.state.user.name = "Sam";
-      } else {
-        const pretty = email.split("@")[0].replace(/[.\-_]/g, " ").replace(/\b\w/g, function (s) { return s.toUpperCase(); });
-        E.state = E.createState("fresh");
-        E.state.user.email = email;
-        E.state.user.name = pretty;
-        E.state.user.isEmailVerified = true;
-        E.state.onboarding.name = pretty;
-        E.state.nav = { tab: "home", stack: [{ id: "onboarding" }] };
-      }
-      if (pending) E.state.pendingCheckout = pending;
+      enterAccount(email);
       toast("Welcome back");
-      if (resumePaywall()) toast("Pick up Pro where you left it");
       E.render({ animate: true, transition: "fade" });
     },
     register: async function () {
@@ -520,9 +651,9 @@
       ui.busy = "register";
       E.render({ animate: false, keepScroll: true });
       await sleep(800);
-      const email = ui.email.trim();
+      const email = ui.email.trim().toLowerCase();
       const guest = E.state.user && E.state.user.isGuest && E.state.user.onboarded;
-      const pretty = email.split("@")[0].replace(/[.\-_]/g, " ").replace(/\b\w/g, function (s) { return s.toUpperCase(); });
+      const pretty = prettyEmailName(email);
       if (!guest) {
         E.state.user.name = pretty;
         E.state.user.onboarded = false;
@@ -531,12 +662,9 @@
       E.state.user.isGuest = false;
       E.state.user.email = email;
       E.state.user.isEmailVerified = false;
-      E.state.ui.otp = ["", "", "", "", "", ""];
-      E.state.ui.resendAt = Date.now() + 30000;
-      E.state.ui.otpExpiresAt = Date.now() + 60000;
-      E.state.ui.busy = null;
-      E.state.ui.authError = "";
-      E.state.ui.editingEmail = false;
+      E.demoPasswords[email] = ui.password;
+      if (!E.demoAccounts[email]) E.demoAccounts[email] = "custom";
+      beginOtp("verify", email);
       E.state.nav = { tab: "home", stack: [{ id: "verify" }] };
       E.render({ animate: true, transition: "up" });
     },
@@ -555,34 +683,65 @@
       E.render({ animate: true, transition: "fade" });
     },
     forgot: async function () {
-      if (!E.validEmail(E.state.ui.email)) { E.state.ui.authError = "Enter a valid email address."; E.render({ animate: false, keepScroll: true }); return; }
-      E.state.ui.busy = "forgot";
+      const ui = E.state.ui;
+      const email = (ui.email || "").trim().toLowerCase();
+      if (!E.validEmail(email)) { ui.authError = "Enter a valid email address."; E.render({ animate: false, keepScroll: true }); return; }
+      ui.busy = "forgot";
       E.render({ animate: false, keepScroll: true });
       await sleep(700);
-      E.state.ui.busy = null;
-      E.state.ui.sentReset = true;
-      E.state.ui.authError = "";
-      toast("If that email exists, we sent a link");
-      E.render({ animate: false, keepScroll: true });
+      beginOtp("reset", email);
+      E.state.nav = { tab: "home", stack: [{ id: "verify" }] };
+      toast("If an account exists, we sent a code");
+      E.render({ animate: true, transition: "up" });
     },
     verify: async function () {
-      const code = (E.state.ui.otp || []).join("");
-      if ((E.state.ui.otpExpiresAt || 0) && Date.now() > E.state.ui.otpExpiresAt) {
-        E.state.ui.authError = "This code has expired. Resend a new one.";
+      const ui = E.state.ui;
+      const code = (ui.otp || []).join("");
+      const purpose = ui.otpPurpose || "verify";
+      if ((ui.otpExpiresAt || 0) && Date.now() > ui.otpExpiresAt) {
+        ui.authError = "This code has expired. Resend a new one.";
         E.render({ animate: false, keepScroll: true });
         return;
       }
       if (code !== "123456") {
-        E.state.ui.authError = "That code doesn't match. Use 123456 for this demo.";
+        ui.authError = "That code doesn't match. Use 123456 for this demo.";
         E.render({ animate: false, keepScroll: true });
         return;
       }
-      E.state.ui.busy = "verify";
+      ui.busy = "verify";
       E.render({ animate: false, keepScroll: true });
       await sleep(600);
+      ui.busy = null;
+      ui.authError = "";
+      if (purpose === "login" || purpose === "claim") {
+        const email = (ui.loginEmail || ui.email || "").trim().toLowerCase();
+        enterAccount(email);
+        if (E.demoAccounts[email] !== "sam") toast(purpose === "claim" ? "You're in" : "Welcome back");
+        E.render({ animate: true, transition: "fade" });
+        return;
+      }
+      if (purpose === "reset") {
+        const email = (ui.resetEmail || ui.loginEmail || "").trim().toLowerCase();
+        if (!E.demoAccounts[email]) {
+          toast("If an account exists, you can sign in");
+          E.state.nav = { tab: "home", stack: [{ id: "login" }] };
+          E.render({ animate: true, transition: "fade" });
+          return;
+        }
+        ui.passwordMode = "reset";
+        ui.currentPassword = "";
+        ui.newPassword = "";
+        ui.showPassword = false;
+        E.state.nav = { tab: "home", stack: [{ id: "login" }, { id: "set-password" }] };
+        E.render({ animate: true, transition: "up" });
+        return;
+      }
       E.state.user.isEmailVerified = true;
-      E.state.ui.busy = null;
-      E.state.ui.authError = "";
+      if (E.state.ui.pendingFeature && resumePendingFeature()) {
+        toast("Email verified");
+        E.render({ animate: true, transition: "fade" });
+        return;
+      }
       const next = E.state.user.onboarded ? "home" : "onboarding";
       E.state.nav = { tab: "home", stack: [{ id: next }] };
       toast("Email verified");
@@ -598,19 +757,73 @@
       E.render({ animate: false, keepScroll: true });
     },
     "edit-email": function () {
-      E.state.ui.editingEmail = true;
-      E.state.ui.newEmail = E.state.user.email;
+      const ui = E.state.ui;
+      ui.editingEmail = true;
+      ui.newEmail = ui.loginEmail || E.state.user.email;
       E.render({ animate: false, keepScroll: true });
     },
     "save-email": function () {
-      if (!E.validEmail(E.state.ui.newEmail)) { toast("Enter a valid email", "err"); return; }
-      E.state.user.email = E.state.ui.newEmail.trim();
-      E.state.ui.editingEmail = false;
-      E.state.ui.resendAt = Date.now() + 30000;
-      E.state.ui.otpExpiresAt = Date.now() + 60000;
-      E.state.ui.otp = ["", "", "", "", "", ""];
-      toast("Code sent to " + E.state.user.email);
+      const ui = E.state.ui;
+      const email = (ui.newEmail || "").trim().toLowerCase();
+      if (!E.validEmail(email)) { toast("Enter a valid email", "err"); return; }
+      const purpose = ui.otpPurpose || "verify";
+      ui.loginEmail = email;
+      ui.email = email;
+      if (purpose === "reset") ui.resetEmail = email;
+      if (purpose === "verify") E.state.user.email = email;
+      ui.editingEmail = false;
+      ui.resendAt = Date.now() + 30000;
+      ui.otpExpiresAt = Date.now() + 60000;
+      ui.otp = ["", "", "", "", "", ""];
+      toast("Code sent to " + email);
       E.render({ animate: false, keepScroll: true });
+    },
+    "open-password": function () {
+      const ui = E.state.ui;
+      const email = (E.state.user.email || "").trim().toLowerCase();
+      ui.passwordMode = E.demoPasswords[email] ? "update" : "create";
+      ui.currentPassword = "";
+      ui.newPassword = "";
+      ui.authError = "";
+      ui.showPassword = false;
+      push("set-password");
+    },
+    "save-password": function () {
+      const ui = E.state.ui;
+      const mode = ui.passwordMode || "create";
+      const email = (mode === "reset" ? (ui.resetEmail || ui.loginEmail) : E.state.user.email || "").trim().toLowerCase();
+      const next = ui.newPassword || "";
+      if (!E.passwordOk(next)) {
+        ui.authError = "Use 6+ characters with a letter, a number, and a symbol.";
+        E.render({ animate: false, keepScroll: true });
+        return;
+      }
+      if (mode === "update") {
+        if (E.demoPasswords[email] !== ui.currentPassword) {
+          ui.authError = "Current password doesn't match.";
+          E.render({ animate: false, keepScroll: true });
+          return;
+        }
+        if (ui.currentPassword === next) {
+          ui.authError = "New password must be different.";
+          E.render({ animate: false, keepScroll: true });
+          return;
+        }
+      }
+      E.demoPasswords[email] = next;
+      if (!E.demoAccounts[email]) E.demoAccounts[email] = "custom";
+      ui.currentPassword = "";
+      ui.newPassword = "";
+      ui.password = "";
+      ui.authError = "";
+      if (mode === "reset") {
+        toast("Password updated. Log in with it.");
+        E.state.nav = { tab: "home", stack: [{ id: "login" }] };
+        E.render({ animate: true, transition: "fade" });
+        return;
+      }
+      toast(mode === "update" ? "Password updated" : "Password saved");
+      pop();
     },
     "ask-logout": function () {
       const guest = E.state.user.isGuest;
@@ -728,6 +941,9 @@
     shutter: function () {
       if (E.state.flags.cameraDenied && E.state.ui.scanMode === "photo") return;
       const mode = E.state.ui.scanMode;
+      const kind = mode === "barcode" ? "barcode" : "shutter";
+      if (lockedScan()) { E.state.ui.pendingGate = kind; openModal("paywall"); return; }
+      if (kind === "shutter" && !E.state.user.ai) { E.state.ui.pendingGate = "shutter"; openModal("ai-consent"); return; }
       runScan(function () { return E.scanPreset(mode === "barcode" ? "barcode" : "photo"); });
     },
     "describe-chip": function (el) {
@@ -737,13 +953,15 @@
     "describe-submit": function () {
       const text = (E.state.ui.describeText || "").trim();
       if (!text) { toast("Describe what you ate", "err"); return; }
+      if (lockedScan()) { E.state.ui.pendingGate = "describe"; openModal("paywall"); return; }
+      if (!E.state.user.ai) { E.state.ui.pendingGate = "describe"; openModal("ai-consent"); return; }
       runScan(function () { return E.mealFromText(text); });
     },
     "open-paywall": function () { openModal("paywall"); },
     "guest-pro": function () {
       E.state.pendingCheckout = { plan: E.state.ui.selectedPlan || "yearly" };
       E.state.modal = null;
-      push("register", {}, "right");
+      askEmailFor({ type: "paywall" });
     },
     "retry-scan": function () { if (lastScan) runScan(lastScan); },
     "scan-qty": function (el) {
@@ -758,7 +976,16 @@
       E.render({ animate: false, keepScroll: true });
     },
     "scan-type": function (el) { E.state.scan.mealType = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
-    "scan-save-toggle": function () { E.state.scan.saveLater = !E.state.scan.saveLater; E.render({ animate: false, keepScroll: true }); },
+    "scan-save-toggle": function () {
+      const turningOn = E.state.scan && !E.state.scan.saveLater;
+      if (turningOn && !E.isPro() && (E.state.saved || []).length >= 10) {
+        E.state.ui.pendingGate = "save";
+        openModal("paywall");
+        return;
+      }
+      E.state.scan.saveLater = !E.state.scan.saveLater;
+      E.render({ animate: false, keepScroll: true });
+    },
     "add-diary": function () {
       const scan = E.state.scan;
       if (!scan || !scan.items.length) { toast("Nothing to add", "err"); return; }
@@ -771,12 +998,16 @@
       E.render({ animate: true, transition: "fade" });
     },
     "discard-scan": function () {
-      ask({ title: "Leave without adding?", message: "This scan won't be saved.", ok: "Discard", danger: true, action: "do-discard" });
-    },
-    "do-discard": function () {
       E.state.scan = null;
-      if (E.current().id === "scan-result" && E.state.nav.stack.length > 1) E.state.nav.stack.pop();
-      if (E.current().id === "scan" && E.state.nav.stack.length > 1) E.state.nav.stack.pop();
+      E.state.ui.analyzing = false;
+      E.state.ui.scanError = "";
+      const stack = E.state.nav.stack;
+      while (stack.length > 1) {
+        const id = stack[stack.length - 1].id;
+        if (id !== "scan-result" && id !== "scan") break;
+        stack.pop();
+      }
+      if (!stack.length) E.state.nav.stack = [{ id: "home" }];
       toast("Scan discarded");
       E.render({ animate: true, transition: "fade" });
     },
@@ -857,7 +1088,11 @@
     },
     "save-weight": function () { commitWeight(false); },
     "save-weight-replace": function () { commitWeight(true); },
-    "close-modal": function () { E.state.modal = null; E.render({ animate: false, keepScroll: true }); },
+    "close-modal": function () {
+      if (E.state.modal && E.state.modal.id === "paywall") E.state.ui.pendingGate = null;
+      E.state.modal = null;
+      E.render({ animate: false, keepScroll: true });
+    },
     "close-sheet": function () { E.state.sheet = null; E.render({ animate: false, keepScroll: true }); },
     "close-confirm": function () { E.state.confirm = null; E.render({ animate: false, keepScroll: true }); },
     "close-light": function () { E.state.lightbox = null; E.render({ animate: false, keepScroll: true }); },
@@ -1200,9 +1435,21 @@
       E.render({ animate: true, transition: "fade" });
     },
     "share-meal": function (el) {
+      const id = (el && el.dataset && el.dataset.id) || E.state.ui.shareMealId || (E.currentParams() || {}).id;
+      if (!E.isPro()) {
+        E.state.ui.shareMealId = id || "";
+        E.state.ui.pendingGate = "share";
+        openModal("paywall");
+        return;
+      }
+      E.state.ui.shareMealId = id || "";
       E.state.ui.shareChat = null;
       E.state.ui.shareNote = "";
-      openModal("share", { mealId: el.dataset.id || E.currentParams().id });
+      openModal("share", { mealId: id });
+    },
+    "gate-discover": function () {
+      E.state.ui.pendingGate = "discover";
+      openModal("paywall");
     },
     "pick-share": function (el) { E.state.ui.shareChat = el.dataset.id; E.render({ animate: false, keepScroll: true }); },
     "send-share": function () {
@@ -1222,7 +1469,8 @@
     buy: async function () {
       if (E.state.user.isGuest) {
         E.state.pendingCheckout = { plan: E.state.ui.selectedPlan || "yearly" };
-        push("register");
+        E.state.modal = null;
+        askEmailFor({ type: "paywall" });
         return;
       }
       if (!E.state.user.isEmailVerified) { toast("Verify your email before subscribing", "err"); return; }
@@ -1245,7 +1493,9 @@
       E.state.ui.busy = null;
       E.state.modal = null;
       const label = plan === "yearly" ? "Yearly" : plan === "sixmonth" ? "6-month" : "Monthly";
-      ask({ title: "You're on Pro", message: label + " plan is active via " + (razor ? "Razorpay" : "the store") + ". You were not charged.", ok: "Nice", hideCancel: true, action: "noop-render" });
+      toast(label + " Pro is on. You were not charged.");
+      if (E.state.ui.pendingGate) resumeGate();
+      else ask({ title: "You're on Pro", message: label + " plan is active via " + (razor ? "Razorpay" : "the store") + ". You were not charged.", ok: "Nice", hideCancel: true, action: "noop-render" });
     },
     trial: function () {
       const sub = E.state.user.subscription;
@@ -1256,7 +1506,8 @@
       sub.renewsAt = null;
       E.state.modal = null;
       toast("3-day Pro trial started");
-      E.render({ animate: false, keepScroll: true });
+      if (E.state.ui.pendingGate) resumeGate();
+      else E.render({ animate: false, keepScroll: true });
     },
     restore: function () {
       E.state.flags.restoreFlip = !E.state.flags.restoreFlip;
@@ -1319,7 +1570,13 @@
     "ai-allow": function () {
       E.state.user.ai = true;
       E.state.modal = null;
-      toast("AI Processing enabled");
+      if (E.state.ui.pendingGate) resumeGate();
+      else { toast("AI Processing enabled"); E.render({ animate: false, keepScroll: true }); }
+    },
+    "ai-not-now": function () {
+      E.state.ui.pendingGate = null;
+      E.state.modal = null;
+      toast("AI Processing was not enabled", "err");
       E.render({ animate: false, keepScroll: true });
     },
     toggle: function (el) {
@@ -1415,6 +1672,7 @@
     },
     toast: function (el) { toast(el.dataset.msg || "Saved", el.dataset.kind); },
     "add-photo": function () {
+      if (!E.isPro()) { E.state.ui.pendingGate = "photo"; openModal("paywall"); return; }
       E.state.photos.unshift({ id: E.uid("ph"), date: E.todayIso(), caption: "Added just now", hue: Math.floor(Math.random() * 360) });
       toast("Photo added");
       E.render({ animate: false, keepScroll: true });
@@ -1422,8 +1680,9 @@
     "save-measure": function () {
       const ui = E.state.ui;
       const waist = Number(ui.measureWaist); const hips = Number(ui.measureHips); const chest = Number(ui.measureChest);
-      if (!waist || !hips || !chest) { toast("Add waist, hips, and chest", "err"); return; }
-      E.state.measurements.unshift({ id: E.uid("ms"), date: E.todayIso(), waist: waist, hips: hips, chest: chest });
+      if (!waist) { toast("Add a waist measurement", "err"); return; }
+      if ((hips || chest) && !E.isPro()) { E.state.ui.pendingGate = "measure"; openModal("paywall"); return; }
+      E.state.measurements.unshift({ id: E.uid("ms"), date: E.todayIso(), waist: waist, hips: hips || 0, chest: chest || 0 });
       ui.measureWaist = ui.measureHips = ui.measureChest = "";
       toast("Measurement saved");
       E.render({ animate: false, keepScroll: true });

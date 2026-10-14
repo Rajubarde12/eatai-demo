@@ -79,7 +79,7 @@
       (over ? '<div class="caption mt8" style="color:rgba(255,255,255,.75)">Tomorrow is a fresh plate. No catching up required.</div>' : "") +
       "</div>" + E.ring(Math.min(1, eaten.kcal / Math.max(1, plan.kcal)), { color: over ? "#FF6A3D" : "#C6F135", center: E.icon("flame") }) + "</div>" +
       '<div class="mt8">' + E.macros(eaten, plan, false) + "</div></div>" +
-      (u.isGuest ? '<button type="button" class="banner mt16 rise" data-action="go" data-screen="register"><span style="font-size:28px">☁️</span><span class="grow"><span class="heading" style="font-size:16px">Save your progress</span><span class="caption">A free account keeps meals, streak, and chat.</span></span></button>' : "") +
+      (u.isGuest ? '<button type="button" class="banner mt16 rise" data-action="ask-email"><span style="font-size:28px">☁️</span><span class="grow"><span class="heading" style="font-size:16px">Save your progress</span><span class="caption">Add your email. A code unlocks chat and the rest.</span></span></button>' : "") +
       (coachOn ? '<button type="button" class="card mt16 rise" data-action="go" data-screen="coach-history" style="text-align:left;border:0;width:100%;color:inherit"><div class="row gap12"><span class="avatar" style="width:42px;height:42px;background:var(--soft)">' + E.icon("sparkles") + '</span><span class="overline">Coach</span></div><div class="heading mt12">' + E.esc(coach.title) + '</div><p class="body mt8">' + E.esc(coach.body) + '</p><div class="coach-tip mt12">💡 ' + E.esc(coach.tip) + "</div></button>"
         : '<p class="card mt16 body">“Small plates, steady days. You\'re already in motion.”</p>') +
       '<div class="card mt16 rise"><div class="between"><div><div class="overline">Water</div><div class="heading mt4">' + water + " of " + target + ' glasses</div></div>' +
@@ -144,7 +144,7 @@
   E.screens.scan = function () {
     const ui = E.state.ui;
     const mode = ui.scanMode || "photo";
-    const locked = E.state.flags.scanLimit && !E.isPro();
+    const locked = !E.isPro() || E.state.flags.scanLimit;
     const denied = E.state.flags.cameraDenied && mode === "photo";
     const titles = { photo: "Scan meal", barcode: "Scan barcode", describe: "Describe meal" };
     const top = '<button type="button" class="icon-btn on-photo" data-action="back" aria-label="Close">' + E.icon("x") + '</button><div class="top-title center"><div class="heading" style="color:white">' + titles[mode] + "</div></div>" +
@@ -212,9 +212,21 @@
       '<div class="mt12" id="scan-meal-macros">' + E.macros({ p: totals.p, c: totals.c, f: totals.f }, { p: Math.max(totals.p, 1), c: Math.max(totals.c, 1), f: Math.max(totals.f, 1) }) + "</div></div>" +
       '<div class="card mt12 between"><div><div class="heading" style="font-size:15px">Save for quick add later</div><div class="caption">Shows in Eat it again</div></div>' +
       E.switch(!!scan.saveLater, 'data-action="scan-save-toggle"') + "</div>" +
-      '<div class="mt16">' + E.btn("Add to diary", { attrs: 'data-action="add-diary"' }) + "</div>" +
-      '<div class="mt8">' + E.btn("Discard", { variant: "ghost", attrs: 'data-action="discard-scan"' }) + "</div></div>";
-    return E.page({ bleed: true, body: body, top: '<div class="food-actions" style="position:absolute;top:60px;left:12px;z-index:3">' + E.iconBtn("chevron-left", 'data-action="discard-scan" aria-label="Back"', "on-photo") + "</div>" });
+      "</div>";
+    const footer = '<div class="grid2">' +
+      E.btn("Discard", { variant: "secondary", attrs: 'data-action="discard-scan" data-testid="scan-discard"' }) +
+      E.btn("Add to diary", { attrs: 'data-action="add-diary" data-testid="scan-add"' }) + "</div>";
+    return E.page({
+      bleed: true,
+      footer: footer,
+      body: body.replace(
+        '<div class="food-hero">',
+        '<div class="food-hero"><div class="food-actions">' + E.iconBtn("x", 'data-action="discard-scan" data-testid="scan-discard-back" aria-label="Discard"', "on-photo") + "</div>"
+      ).replace(
+        'place-items:center;font-size:64px"',
+        'place-items:center;font-size:64px;pointer-events:none"'
+      )
+    });
   };
 
   E.screens.food = function () {

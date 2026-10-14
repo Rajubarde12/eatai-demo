@@ -23,7 +23,7 @@
       ["bell", "Reminders", "Meal and weigh-in alerts", "reminders", true],
       ["user", "Social profile", "Name, photo, bio", "social", true]
     ];
-    const featureHtml = features.filter(function (f) { return !f[4] || !u.isGuest; }).map(function (f) {
+    const featureHtml = features.map(function (f) {
       const action = f[3] === "weight" ? 'data-action="open-weight"' : 'data-action="go" data-screen="' + f[3] + '"';
       return E.navRow(f[0], f[1], f[2], action);
     }).join("");
@@ -35,7 +35,7 @@
       ["image", "Progress photo alerts", "Weekly reminder and export", "settings-photos"]
     ];
     const guest = u.isGuest ? '<div class="hero-card mt16"><div class="heading">Keep your progress</div><p class="caption mt8" style="color:rgba(255,255,255,.7)">Meals, streak, and chat live on a free account.</p><div class="mt12">' +
-      E.btn("Create free account", { variant: "accent", attrs: 'data-action="go" data-screen="register"' }) + '</div><div class="mt8">' +
+      E.btn("Add your email", { variant: "accent", attrs: 'data-action="ask-email" data-testid="profile-claim-email"' }) + '</div><div class="mt8">' +
       E.btn("I already have an account", { variant: "ghost", attrs: 'data-action="go" data-screen="login" style="color:white"' }) + "</div></div>" : "";
     const body = '<div class="center mt8">' + E.avatar({ name: u.name, color: u.color, size: 72 }) +
       '<div class="title mt12">' + E.esc(u.name || "You") + "</div>" +
@@ -57,9 +57,10 @@
       '<div class="overline mt24">Features</div><div class="list-card mt8">' + featureHtml + "</div>" +
       '<div class="overline mt24">App settings</div><div class="list-card mt8">' + settings.map(function (s) { return E.navRow(s[0], s[1], s[2], 'data-action="go" data-screen="' + s[3] + '"'); }).join("") + "</div>" +
       '<div class="overline mt24">Privacy & safety</div><div class="list-card mt8">' +
-      E.navRow("shield", "Privacy & Safety", u.isGuest ? "Create an account to manage discovery" : "Discovery, pause, blocked, reports", u.isGuest ? 'data-action="go" data-screen="register"' : 'data-action="go" data-screen="privacy"') + "</div>" +
+      E.navRow("shield", "Privacy & Safety", u.isGuest ? "Add your email to manage discovery" : "Discovery, pause, blocked, reports", 'data-action="go" data-screen="privacy"') + "</div>" +
       '<div class="overline mt24">Legal</div><div class="list-card mt8">' + E.navRow("scale", "Legal", "About, policies, privacy and deletion", 'data-action="go" data-screen="legal"') + "</div>" +
       '<div class="overline mt24">Account</div><div class="list-card mt8">' +
+      (!u.isGuest && u.email ? E.navRow("lock", E.demoPasswords[(u.email || "").toLowerCase()] ? "Update password" : "Create a password", E.demoPasswords[(u.email || "").toLowerCase()] ? "Change the password for this email" : "Optional. You can keep using a login code.", 'data-action="open-password"') : "") +
       E.navRow("log-out", u.isGuest ? "Reset guest session" : "Log out", u.isGuest ? "Clears this demo guest" : "You'll return to the welcome screen", 'data-action="ask-logout"') +
       '<button type="button" class="nav-row" data-action="go" data-screen="delete-account"><span class="ico-sq">' + E.icon("trash-2") + '</span><span class="grow"><span class="heading danger" style="font-size:15px">Delete account</span><span class="caption" style="display:block">' + (u.deletion ? "Deletion scheduled" : "30-day grace period · full details") + "</span></span>" + E.icon("chevron-right") + "</button></div>" +
       '<button type="button" class="center mt24 caption" data-longpress="dev" style="width:100%;border:0;background:transparent;padding:12px">Version <b class="lime" style="color:var(--ink);background:var(--lime);border-radius:8px;padding:2px 6px">2.0.7</b></button>';
@@ -157,8 +158,8 @@
       { id: "monthly", name: "Monthly", price: priceOf(299), per: "Billed monthly", note: "" }
     ];
     if (u.isGuest) {
-      return '<div class="paywall"><button type="button" class="icon-btn on-photo" data-action="close-modal">' + E.icon("x") + '</button><div class="title mt20">Create an account first</div><p class="body mt8" style="color:rgba(255,255,255,.7)">We will bring you back to this plan after the account is ready. This demo never charges you.</p><div class="mt20">' +
-        E.btn("Create free account", { variant: "accent", attrs: 'data-action="guest-pro"' }) + "</div></div>";
+      return '<div class="paywall"><button type="button" class="icon-btn on-photo" data-action="close-modal">' + E.icon("x") + '</button><div class="title mt20">Add your email</div><p class="body mt8" style="color:rgba(255,255,255,.7)">We\'ll send a code and bring you back to this plan. This demo never charges you.</p><div class="mt20">' +
+        E.btn("Add your email", { variant: "accent", attrs: 'data-action="guest-pro" data-testid="paywall-claim-email"' }) + "</div></div>";
     }
     const provider = E.state.ui.billingProvider || "store";
     const razor = provider === "razorpay";
@@ -181,12 +182,10 @@
 
   E.modals["ai-consent"] = function () {
     return '<div class="modal-wrap" style="background:var(--canvas);overflow:auto;padding:16px 20px 28px"><div class="overline">Before we estimate</div><div class="title mt8">Allow AI Processing?</div>' +
-      '<p class="body muted mt12">Plain language, no surprises.</p><div class="stack mt16">' +
-      ["Photos you submit are used only to estimate foods and calories.", "We don't use scans to advertise to you.", "You can turn this off anytime on Profile.", "This prototype stays in your browser — nothing is uploaded to a real server."].map(function (t) {
-        return '<div class="card">' + E.esc(t) + "</div>";
-      }).join("") + "</div>" +
-      '<div class="mt20">' + E.btn("Allow", { attrs: 'data-action="ai-allow"' }) + "</div>" +
-      '<div class="mt8">' + E.btn("Not now", { variant: "secondary", attrs: 'data-action="close-modal"' }) + "</div></div>";
+      '<p class="body muted mt12">Food scan and describe meal send the photo or the text you type so we can estimate calories. We don\'t use it for ads. You can turn this off later on Profile.</p>' +
+      '<div class="mt20">' + E.btn("Allow AI Processing", { attrs: 'data-action="ai-allow" data-testid="ai-allow"' }) + "</div>" +
+      '<div class="mt8">' + E.btn("Not now", { variant: "secondary", attrs: 'data-action="ai-not-now" data-testid="ai-not-now"' }) + "</div>" +
+      '<p class="caption center mt12">If you choose Not now, food scan and describe stay off.</p></div>';
   };
 
   function settingsShell(title, sub, body) {
@@ -305,9 +304,9 @@
       top: E.topTitle("Measurements"),
       body: '<div class="grid3">' +
         E.field({ label: "Waist", id: "mw", model: "mw", value: E.state.ui.measureWaist, placeholder: "82" }) +
-        E.field({ label: "Hips", id: "mh", model: "mh", value: E.state.ui.measureHips, placeholder: "98" }) +
-        E.field({ label: "Chest", id: "mc", model: "mc", value: E.state.ui.measureChest, placeholder: "90" }) +
-        '</div><div class="mt12">' + E.btn("Save measurement", { attrs: 'data-action="save-measure"' }) + "</div>" + rows
+        E.field({ label: "Hips · Pro", id: "mh", model: "mh", value: E.state.ui.measureHips, placeholder: "98" }) +
+        E.field({ label: "Chest · Pro", id: "mc", model: "mc", value: E.state.ui.measureChest, placeholder: "90" }) +
+        '</div><p class="caption mt8">Waist is free. Hips and chest need Pro.</p><div class="mt12">' + E.btn("Save measurement", { attrs: 'data-action="save-measure"' }) + "</div>" + rows
     });
   };
 

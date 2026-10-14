@@ -181,6 +181,8 @@ window.EatAI = window.EatAI || {};
     return {
       email: "", password: "", showPassword: false, authError: "",
       otp: ["", "", "", "", "", ""], resendAt: 0, otpExpiresAt: 0, editingEmail: false, newEmail: "",
+      otpPurpose: "verify", loginEmail: "", resetEmail: "", passwordMode: "create",
+      currentPassword: "", newPassword: "", pendingFeature: null, pendingGate: null, shareMealId: "",
       busy: null, chatTab: "chats", chatQuery: "", discoverQuery: "",
       communityTab: "mine", communityQuery: "", diaryOffset: 0, progressWeek: 0,
       weightRange: "1M", weightDraft: 67, scanMode: "photo", torch: false,
@@ -810,6 +812,17 @@ window.EatAI = window.EatAI || {};
       body: "Calories and protein are in a kind range. Keep dinner normal, not tiny.",
       tip: "A glass of water before dinner is enough."
     };
+  };
+
+  E.demoPasswords = {
+    "priya@eat.ai": "EatAI1!",
+    "rahul@eat.ai": "EatAI1!"
+  };
+  E.demoAccounts = {
+    "priya@eat.ai": "priya",
+    "rahul@eat.ai": "rahul",
+    "sam@demo.app": "sam",
+    "aisha@eat.ai": "aisha"
   };
 
   E.state = E.newInstall();

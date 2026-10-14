@@ -16,7 +16,7 @@
   E.screens.messages = function () {
     const u = E.state.user;
     if (u.isGuest) {
-      return E.page({ tab: true, body: E.empty({ emoji: "💬", title: "Save your progress first", sub: "Chat is for accounts, so your meals and messages stay together.", button: E.btn("Create account", { attrs: 'data-action="go" data-screen="register"' }) }) });
+      return E.page({ tab: true, body: E.empty({ emoji: "💬", title: "Add your email", sub: "We'll send a code. Your meals stay, and then chat opens.", button: E.btn("Email me a code", { attrs: 'data-action="ask-email" data-feature="chat" data-testid="chat-claim-email"' }) }) });
     }
     if (u.ageBlocked || E.age(u.birthYear, u.birthMonth) < 18) {
       return E.page({ tab: true, body: E.empty({ emoji: "🌱", title: "Chat opens at 18", sub: "You can still track meals, water, and your plan. Discovery stays off — this isn't a dead end.", button: E.btn("Back to Home", { attrs: 'data-action="tab" data-tab="home"' }) }) });
@@ -53,6 +53,8 @@
           E.btn("Decline", { variant: "secondary", size: "md", attrs: 'data-action="decline-req" data-id="' + r.id + '"' }) +
           E.btn("Accept", { size: "md", attrs: 'data-action="accept-req" data-id="' + r.id + '"' }) + "</div></div>";
       }).join("") || E.empty({ emoji: "👍", title: "No requests", sub: "When someone says hi, it lands here." });
+    } else if (!E.isPro()) {
+      inner = E.empty({ emoji: "🔒", title: "Discover is part of Pro", sub: "Find a training partner after you unlock Pro. Chats you already have stay open.", button: E.btn("See Pro", { attrs: 'data-action="gate-discover" data-testid="discover-pro"' }) });
     } else {
       const dq = (E.state.ui.discoverQuery || "").toLowerCase();
       let people = E.state.discover || [];

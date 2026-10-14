@@ -24,21 +24,42 @@
 
   E.screens.login = function () {
     const ui = E.state.ui;
-    const body = '<div class="mt12"><div class="hero">Welcome back</div><p class="body muted mt8">Log in to keep your streak going.</p></div>' +
+    const emailOk = E.validEmail(ui.email);
+    const body = '<div class="mt12"><div class="hero">Welcome back</div><p class="body muted mt8">Use a code, or your email and password.</p></div>' +
       '<div class="mt24"><button type="button" class="btn btn-light btn-lg btn-block" data-action="google">' + (ui.busy === "google" ? '<span class="spinner"></span>' : E.google() + "<span>Continue with Google</span>") + "</button></div>" +
       '<div class="center caption mt16">or</div>' +
       '<div class="stack mt12">' +
       E.field({ label: "Email", id: "email", model: "email", type: "email", placeholder: "you@email.com", value: ui.email, icon: "mail" }) +
+      "</div>" +
+      '<div class="mt12">' + E.btn("Email me a code", { busy: ui.busy === "code", disabled: !emailOk, attrs: 'data-action="send-login-code" data-testid="login-send-code" id="login-send-code"' }) + "</div>" +
+      '<div class="center caption mt16">or use a password</div>' +
+      '<div class="stack mt12">' +
       E.field({ label: "Password", id: "password", model: "password", type: ui.showPassword ? "text" : "password", placeholder: "Your password", value: ui.password, icon: "lock", trail: '<button type="button" class="trail" data-action="toggle-password" aria-label="Show password">' + E.icon(ui.showPassword ? "eye-off" : "eye") + "</button>" }) +
       "</div>" +
       '<div class="mt8"><button type="button" class="btn btn-ghost btn-sm" data-action="go" data-screen="forgot" style="padding-left:0">Forgot password?</button></div>' +
       (ui.authError ? '<p class="field-error mt8">' + E.esc(ui.authError) + "</p>" : "") +
-      '<div class="mt16">' + E.btn("Log in", { busy: ui.busy === "login", disabled: !ui.email || !ui.password, attrs: 'data-action="login"' }) + "</div>" +
+      '<div class="mt16">' + E.btn("Log in", { busy: ui.busy === "login", disabled: !ui.email || !ui.password, attrs: 'data-action="login" data-testid="login-password" id="login-password"' }) + "</div>" +
       authFooter("New here?", "Create account", "register");
     return E.page({
       top: E.backBtn(),
       body: body
     });
+  };
+
+  E.screens["claim-email"] = function () {
+    const ui = E.state.ui;
+    const feature = ui.pendingFeature;
+    const names = { communities: "communities", reminders: "reminders", social: "your social profile", subscription: "your plan", privacy: "privacy settings" };
+    const what = !feature ? "your account" : feature.type === "tab" ? "chat" : feature.type === "paywall" ? "Pro" : (names[feature.id] || "this");
+    const emailOk = E.validEmail(ui.email);
+    const body = '<div class="mt8"><div class="hero" style="font-size:32px">Add your email</div><p class="body muted mt8">We\'ll send a code. After that, ' + what + ' opens. Meals you already logged stay here. If this email already has an account, we open that account.</p></div>' +
+      '<div class="stack mt20">' +
+      E.field({ label: "Email", id: "email", model: "email", type: "email", placeholder: "you@email.com", value: ui.email, icon: "mail" }) +
+      "</div>" +
+      (ui.authError ? '<p class="field-error mt8">' + E.esc(ui.authError) + "</p>" : "") +
+      '<div class="mt16">' + E.btn("Send code", { busy: ui.busy === "claim", disabled: !emailOk, attrs: 'data-action="send-claim-code" data-testid="claim-send-code"' }) + "</div>" +
+      '<div class="center mt12">' + E.btn("I already have an account", { variant: "ghost", attrs: 'data-action="go" data-screen="login"' }) + "</div>";
+    return E.page({ top: E.backBtn(), body: body });
   };
 
   E.screens.register = function () {
@@ -66,38 +87,68 @@
   E.screens.forgot = function () {
     const ui = E.state.ui;
     const body = '<div class="hero" style="font-size:32px">Reset password</div>' +
-      '<p class="body muted mt8">We\'ll send a reset link if an account exists for that email.</p>' +
+      '<p class="body muted mt8">If an account exists, we\'ll email a code. Then you can set a new password.</p>' +
       '<div class="mt20">' + E.field({ label: "Email", id: "email", model: "email", type: "email", placeholder: "you@email.com", value: ui.email, icon: "mail" }) + "</div>" +
       (ui.authError ? '<p class="field-error mt8">' + E.esc(ui.authError) + "</p>" : "") +
-      (ui.sentReset ? '<p class="body mt16">If that email exists, we sent a link. You can head back and log in.</p>' : "") +
-      '<div class="mt20">' + E.btn("Send reset link", { busy: ui.busy === "forgot", disabled: !E.validEmail(ui.email), attrs: 'data-action="forgot"' }) + "</div>";
+      '<div class="mt20">' + E.btn("Send code", { busy: ui.busy === "forgot", disabled: !E.validEmail(ui.email), attrs: 'data-action="forgot" data-testid="forgot-send-code"' }) + "</div>";
     return E.page({ top: E.backBtn(), body: body });
   };
 
   E.screens.verify = function () {
     const u = E.state.user;
     const ui = E.state.ui;
+    const purpose = ui.otpPurpose || "verify";
+    const shownEmail = ui.loginEmail || u.email;
     const left = Math.max(0, Math.ceil((ui.resendAt - Date.now()) / 1000));
     const boxes = ui.otp.map(function (d, i) {
       return '<input inputmode="numeric" maxlength="1" id="otp' + i + '" data-otp="' + i + '" value="' + E.esc(d) + '" class="' + (ui.authError ? "error" : "") + '" aria-label="Digit ' + (i + 1) + '">';
     }).join("");
+    const title = purpose === "reset" ? "Enter the code to reset" : "Enter the 6-digit code";
+    const button = purpose === "login" ? "Log in" : purpose === "claim" || purpose === "reset" ? "Continue" : "Verify email";
     const body = '<div class="overline">Check your inbox</div>' +
-      '<h1 class="title mt8">Enter the 6-digit code</h1>' +
-      '<p class="body muted mt8">We sent it to <b>' + E.esc(u.email) + "</b>. This demo accepts <b>123456</b>. The code expires in about a minute.</p>" +
+      '<h1 class="title mt8">' + title + "</h1>" +
+      '<p class="body muted mt8">We sent it to <b>' + E.esc(shownEmail) + "</b>. This demo accepts <b>123456</b>. The code expires in about a minute.</p>" +
       (ui.otpExpiresAt && Date.now() > ui.otpExpiresAt ? '<p class="field-error mt12">This code has expired. Resend a new one before you try 123456 again.</p>' : "") +
       '<div class="otp mt20">' + boxes + "</div>" +
       (ui.authError ? '<p class="field-error mt12">' + E.esc(ui.authError) + "</p>" : "") +
-      '<div class="mt20">' + E.btn("Verify email", { busy: ui.busy === "verify", attrs: 'data-action="verify"' }) + "</div>" +
+      '<div class="mt20">' + E.btn(button, { busy: ui.busy === "verify", attrs: 'data-action="verify" data-testid="otp-submit"' }) + "</div>" +
       '<div class="center mt16"><button type="button" class="btn btn-ghost btn-md" id="resend-btn" data-action="resend" ' + (left ? "disabled" : "") + ">" +
       (left ? "Resend code in " + left + "s" : "Resend code") + "</button></div>" +
       '<div class="mt20">' +
       (ui.editingEmail
-        ? E.field({ label: "New email", id: "newEmail", model: "newEmail", value: ui.newEmail || u.email, type: "email" }) +
+        ? E.field({ label: "New email", id: "newEmail", model: "newEmail", value: ui.newEmail || shownEmail, type: "email" }) +
           '<div class="mt12">' + E.btn("Save and resend", { size: "md", attrs: 'data-action="save-email"' }) + "</div>"
         : '<button type="button" class="btn btn-ghost btn-md btn-block" data-action="edit-email">Wrong email?</button>') +
       "</div>" +
       '<div class="mt12">' + E.btn("Log out", { variant: "secondary", attrs: 'data-action="logout"' }) + "</div>";
     return E.page({ body: body });
+  };
+
+  E.screens["set-password"] = function () {
+    const ui = E.state.ui;
+    const mode = ui.passwordMode || "create";
+    const email = mode === "reset" ? (ui.resetEmail || ui.email) : (E.state.user.email || "");
+    const rules = E.passwordRules(ui.newPassword);
+    const rule = function (key, label) {
+      return '<div class="rule ' + (rules[key] ? "met" : "") + '"><span class="dot">' + (rules[key] ? "✓" : "") + "</span>" + label + "</div>";
+    };
+    const title = mode === "update" ? "Update password" : mode === "reset" ? "Set a new password" : "Create a password";
+    const sub = mode === "update"
+      ? "Enter the current password, then a new one."
+      : mode === "reset"
+        ? "This replaces the password for " + email + "."
+        : "Optional. You can keep signing in with a code.";
+    const testId = mode === "update" ? "update-password-save" : "set-password-save";
+    const body = '<div class="hero" style="font-size:32px">' + title + "</div>" +
+      '<p class="body muted mt8">' + E.esc(sub) + "</p>" +
+      '<div class="stack mt16">' +
+      (mode === "update" ? E.field({ label: "Current password", id: "current-password", model: "currentPassword", type: ui.showPassword ? "text" : "password", placeholder: "Current password", value: ui.currentPassword, icon: "lock" }) : "") +
+      E.field({ label: "New password", id: "new-password", model: "newPassword", type: ui.showPassword ? "text" : "password", placeholder: "New password", value: ui.newPassword, icon: "lock", trail: '<button type="button" class="trail" data-action="toggle-password" aria-label="Show password">' + E.icon(ui.showPassword ? "eye-off" : "eye") + "</button>" }) +
+      "</div>" +
+      '<div class="rules mt12">' + rule("len", "6+ characters") + rule("letter", "A letter") + rule("number", "A number") + rule("symbol", "A symbol") + "</div>" +
+      (ui.authError ? '<p class="field-error mt8">' + E.esc(ui.authError) + "</p>" : "") +
+      '<div class="mt16">' + E.btn(mode === "update" ? "Update password" : "Save password", { attrs: 'data-action="save-password" data-testid="' + testId + '" id="' + testId + '"' }) + "</div>";
+    return E.page({ top: E.backBtn(), body: body });
   };
 
   const goals = [
