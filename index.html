@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F4F2EC">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>EatAI</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23121210'/%3E%3Cpath d='M16 50c8-8 10-22 32-34-12 18-16 28-26 34-2-5-4-8-6 0z' fill='%23C6F135'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="vendor/swiper-bundle.min.css">
+  <link rel="stylesheet" href="css/app.css">
+  <script src="vendor/tailwind.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            canvas: "#F4F2EC",
+            ink: "#121210",
+            lime: "#C6F135",
+            muted: "#6B6A63"
+          },
+          fontFamily: {
+            sans: ["DM Sans", "Segoe UI", "sans-serif"],
+            display: ["Bricolage Grotesque", "sans-serif"]
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="font-sans antialiased">
+  <div id="desk">
+    <div id="scaler">
+      <div id="phone">
+        <span class="side side-vol1"></span>
+        <span class="side side-vol2"></span>
+        <span class="side side-power"></span>
+        <div class="bezel">
+          <div id="viewport" data-theme="light">
+            <div class="notch"></div>
+            <div id="statusbar">
+              <span data-clock>9:41</span>
+              <span class="status-icons">
+                <i data-lucide="signal"></i>
+                <i data-lucide="wifi"></i>
+                <i data-lucide="battery-full"></i>
+              </span>
+            </div>
+            <div id="stage">
+              <div class="boot">
+                <span class="logo" style="width:64px;height:64px;border-radius:20px">
+                  <svg width="36" height="36" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19C8 16 9 10 19 4C14 12 12 17 8 19C7.2 17.2 6.2 15.6 5 19Z" fill="#C6F135"/></svg>
+                </span>
+                <div class="wordmark">EatAI</div>
+                <span class="spinner" style="border-color:rgba(18,18,16,.15);border-top-color:#121210"></span>
+              </div>
+            </div>
+            <div id="tabbar"></div>
+            <div class="home-indicator"></div>
+            <div id="overlay"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="desk-note">Interactive preview · sign-in, scans, and payments are simulated</p>
+  <script src="vendor/lucide.min.js"></script>
+  <script src="vendor/gsap.min.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="vendor/swiper-bundle.min.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/flow-auth.js"></script>
+  <script src="js/flow-food.js"></script>
+  <script src="js/flow-social.js"></script>
+  <script src="js/flow-you.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
