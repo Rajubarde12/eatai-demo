@@ -1,7 +1,7 @@
 window.EatAI = window.EatAI || {};
 (function () {
   const E = window.EatAI;
-  const KEY = "eatai-demo-v1";
+  const KEY = "eatai-demo-v2";
 
   E.img = {
     dosa: "https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=900&q=70",
@@ -169,24 +169,27 @@ window.EatAI = window.EatAI || {};
   function blankPrefs() {
     return {
       coach: { daily: true, weekly: true, morning: false, time: "20:00" },
-      water: { glassMl: 250, target: 8, reminders: true, reminderTime: "10:00" },
+      water: { glassMl: 250, target: 8, reminders: true, reminderStart: "08:00", reminderEnd: "22:00", smart: false },
       streak: { mode: "meals", freeze: true, showChip: true },
-      units: { weight: "kg", length: "cm", adaptive: true, weighIn: "morning" },
-      photos: { weekly: true, time: "18:00" },
-      reminders: { breakfast: true, lunch: true, dinner: false, bTime: "08:30", lTime: "13:00", dTime: "20:30" },
+      units: { weight: "kg", length: "cm", adaptive: true, weighInOn: true, weighInDay: "sun", weighInTime: "08:00" },
+      photos: { weekly: true, time: "09:00", day: "sun" },
+      reminders: { breakfast: true, lunch: true, dinner: false, bTime: "08:30", lTime: "13:00", dTime: "20:30", custom: [] },
       privacy: { pausedUntil: null, discovery: true, sameGender: false, distance: "Any", cityVisibility: "full", autoDecline: "Off" }
     };
   }
   function blankUi() {
     return {
       email: "", password: "", showPassword: false, authError: "",
-      otp: ["", "", "", "", "", ""], resendAt: 0, editingEmail: false, newEmail: "",
+      otp: ["", "", "", "", "", ""], resendAt: 0, otpExpiresAt: 0, editingEmail: false, newEmail: "",
       busy: null, chatTab: "chats", chatQuery: "", discoverQuery: "",
       communityTab: "mine", communityQuery: "", diaryOffset: 0, progressWeek: 0,
       weightRange: "1M", weightDraft: 67, scanMode: "photo", torch: false,
       scanMealPreset: null, describeText: "", deleteAck: false, selectedPlan: "yearly",
       shareNote: "", shareChat: null, groupName: "", groupPicks: [], cityQuery: "",
-      analyzing: false, analyzeTip: 0, commName: "", commAbout: "", commCity: "Bengaluru",
+      analyzing: false, analyzeTip: 0, scanError: "", scanProgress: "",
+      commName: "", commAbout: "", commCity: "Bengaluru", commView: "feed", openPost: "",
+      replyDraft: "", postDraft: "", nearMe: false, offerCode: "", offerError: "", offerOff: 0,
+      billingProvider: "store", macroMode: "", chatStep: 0, customTitle: "", customTime: "15:00",
       editName: "", editBio: "", socialTags: [], measureWaist: "", measureHips: "", measureChest: ""
     };
   }
@@ -210,13 +213,30 @@ window.EatAI = window.EatAI || {};
       exercise: pre.exercise || "",
       diet: pre.diet || "",
       training: (pre.training || []).slice(),
-      discovery: !!pre.discovery
+      discovery: !!pre.discovery,
+      pregnancy: pre.pregnancy || null
     };
   };
+  E.protectedMode = function (ob) {
+    ob = ob || {};
+    const year = ob.year != null ? ob.year : ob.birthYear;
+    const month = ob.month != null ? ob.month : (ob.birthMonth || 0);
+    const age = E.age(year, month);
+    const preg = ob.pregnancy != null ? ob.pregnancy : ob.pregnancyStatus;
+    if (age > 0 && age < 16) return "kid";
+    if (ob.gender === "female" && preg === "breastfeeding") return "breastfeeding";
+    if (ob.gender === "female" && preg === "pregnant") return "pregnant";
+    return null;
+  };
   E.onboardingSteps = function (ob) {
+    const age = E.age(ob.year, ob.month);
+    const skipDiet = ob.goal === "health" || !!E.protectedMode(ob);
     const s = ["goal", "name", "gender", "birth", "height", "weight"];
-    if (ob.goal !== "health") s.push("target", "pace");
-    s.push("activity", "exercise", "diet", "training", "discovery", "calculating", "reveal");
+    if (skipDiet) s.push("support");
+    else s.push("target", "pace");
+    s.push("activity", "exercise", "diet", "training");
+    if (age >= 18) s.push("discovery");
+    s.push("calculating", "reveal");
     return s;
   };
   E.stepValid = function (ob) {
@@ -233,17 +253,23 @@ window.EatAI = window.EatAI || {};
     return true;
   };
   E.calcPlan = function (ob) {
-    let kcal = ob.goal === "muscle" ? 2400 : ob.goal === "lose" ? 1700 : 2000;
+    const mode = E.protectedMode(ob);
+    const goal = mode || ob.goal === "health" ? "health" : ob.goal;
+    let kcal = goal === "muscle" ? 2400 : goal === "lose" ? 1700 : 2000;
     if (ob.gender === "male") kcal += 150;
     if (ob.gender === "female") kcal -= 50;
     const act = { desk: 0, light: 80, feet: 160, job: 280 };
     const ex = { none: 0, "1-2": 40, "3-4": 100, "5-6": 140, daily: 180 };
     kcal += act[ob.activity] || 0;
     kcal += ex[ob.exercise] || 0;
-    if (ob.pace === "0.25") kcal += ob.goal === "muscle" ? 40 : 80;
-    if (ob.pace === "0.75") kcal += ob.goal === "muscle" ? 180 : -80;
-    if (ob.pace === "1") kcal += ob.goal === "muscle" ? 240 : -140;
-    kcal = Math.max(1400, Math.round(kcal / 10) * 10);
+    if (!mode && goal !== "health") {
+      if (ob.pace === "0.25") kcal += goal === "muscle" ? 40 : 80;
+      if (ob.pace === "0.75") kcal += goal === "muscle" ? 180 : -80;
+      if (ob.pace === "1") kcal += goal === "muscle" ? 240 : -140;
+    }
+    if (mode === "breastfeeding") kcal += 300;
+    const floor = mode === "kid" ? 1600 : 1400;
+    kcal = Math.max(floor, Math.round(kcal / 10) * 10);
     const p = Math.round((kcal * 0.3) / 4);
     const f = Math.round((kcal * 0.28) / 9);
     const c = Math.max(0, Math.round((kcal - p * 4 - f * 9) / 4));
@@ -375,26 +401,108 @@ window.EatAI = window.EatAI || {};
     ];
   }
 
+  function post(id, author, text, time, likes, replies) {
+    return { id: id, author: author, text: text, time: time, likes: likes || 0, liked: false, replies: replies || [] };
+  }
   function communities() {
     return {
       mine: [
-        { id: "cm1", name: "Bengaluru Run Club", city: "Bengaluru", members: 1284, admin: true, hue: 80, description: "Easy weekday runs and honest fuel talk.", rules: "Be kind. No body shaming. No dating pitches.", posts: [
-          { id: "p1", author: "Neha", text: "Cubbon loop done. Logged a banana after — 90 kcal and worth it.", time: "2h" },
-          { id: "p2", author: "Arjun", text: "Anyone else under-eating protein on long run days?", time: "5h" }
-        ]},
-        { id: "cm2", name: "South Indian Meal Prep", city: "Bengaluru", members: 642, admin: false, hue: 28, description: "Dosa, dal, and batch-cooking Sundays.", rules: "Recipes welcome. Estimates stay estimates.", posts: [
-          { id: "p3", author: "Meera", text: "Sambar batch for four lunches. About 110 kcal a bowl.", time: "1d" }
-        ]}
+        { id: "cm1", name: "Bengaluru Run Club", city: "Bengaluru", members: 1284, admin: true, joined: true, hue: 80, description: "Easy weekday runs and honest fuel talk.", rules: "Be kind. No body shaming. No dating pitches.",
+          memberList: [{ id: "me", name: "You", role: "admin" }, { id: "m-neha", name: "Neha", role: "member" }, { id: "m-arjun", name: "Arjun", role: "member" }],
+          pending: [{ id: "req-kabir", name: "Kabir Menon" }],
+          posts: [
+            post("p1", "Neha", "Cubbon loop done. Logged a banana after — 90 kcal and worth it.", "2h", 6, [{ id: "rp1", author: "Arjun", text: "That banana was the right call." }]),
+            post("p2", "Arjun", "Anyone else under-eating protein on long run days?", "5h", 3, [])
+          ]},
+        { id: "cm2", name: "South Indian Meal Prep", city: "Bengaluru", members: 642, admin: false, joined: true, hue: 28, description: "Dosa, dal, and batch-cooking Sundays.", rules: "Recipes welcome. Estimates stay estimates.",
+          memberList: [{ id: "me", name: "You", role: "member" }, { id: "m-meera", name: "Meera", role: "admin" }],
+          pending: [],
+          posts: [post("p3", "Meera", "Sambar batch for four lunches. About 110 kcal a bowl.", "1d", 4, [])]
+        }
       ],
       discover: [
-        { id: "cd1", name: "Delhi Veggie Club", city: "Delhi", members: 980, hue: 120, description: "Vegetarian plates from home kitchens.", posts: [{ id: "p4", author: "Aman", text: "Demo post — rajma night.", time: "3h" }] },
-        { id: "cd2", name: "Mumbai Fitness", city: "Mumbai", members: 2104, hue: 200, description: "Marine Drive walks and gym check-ins.", posts: [{ id: "p5", author: "Ria", text: "Demo post — sunrise walk logged.", time: "6h" }] },
-        { id: "cd3", name: "Pune Jain Eats", city: "Pune", members: 310, hue: 45, description: "Jain-friendly meal ideas.", posts: [] },
-        { id: "cd4", name: "Hyderabad Protein", city: "Hyderabad", members: 870, hue: 12, description: "High-protein home food, biryani included.", posts: [] },
-        { id: "cd5", name: "Chennai Home Cooks", city: "Chennai", members: 540, hue: 160, description: "Tiffin boxes and honest portions.", posts: [] }
+        { id: "cd0", name: "Indiranagar Breakfast Club", city: "Bengaluru", members: 86, joined: false, hue: 90, description: "Weekday tiffin and a short walk after.", rules: "No diet talk that shames anyone.", memberList: [], pending: [], posts: [post("p0", "Neha", "Idli count this morning: two. Enough.", "4h", 2, [])] },
+        { id: "cd1", name: "Delhi Veggie Club", city: "Delhi", members: 980, joined: false, hue: 120, description: "Vegetarian plates from home kitchens.", rules: "Be kind.", memberList: [], pending: [], posts: [post("p4", "Aman", "Demo post — rajma night.", "3h", 1, [])] },
+        { id: "cd2", name: "Mumbai Fitness", city: "Mumbai", members: 2104, joined: false, hue: 200, description: "Marine Drive walks and gym check-ins.", rules: "No dating pitches.", memberList: [], pending: [], posts: [post("p5", "Ria", "Demo post — sunrise walk logged.", "6h", 8, [])] },
+        { id: "cd3", name: "Pune Jain Eats", city: "Pune", members: 310, joined: false, hue: 45, description: "Jain-friendly meal ideas.", rules: "Estimates stay estimates.", memberList: [], pending: [], posts: [] },
+        { id: "cd4", name: "Hyderabad Protein", city: "Hyderabad", members: 870, joined: false, hue: 12, description: "High-protein home food, biryani included.", rules: "Be kind.", memberList: [], pending: [], posts: [] },
+        { id: "cd5", name: "Chennai Home Cooks", city: "Chennai", members: 540, joined: false, hue: 160, description: "Tiffin boxes and honest portions.", rules: "Be kind.", memberList: [], pending: [], posts: [] }
       ]
     };
   }
+  function unjoinedCatalog() {
+    const bags = communities();
+    const discover = (bags.discover || []).slice();
+    (bags.mine || []).forEach(function (c) {
+      const copy = JSON.parse(JSON.stringify(c));
+      copy.joined = false;
+      copy.admin = false;
+      copy.pending = [];
+      copy.memberList = (copy.memberList || []).filter(function (m) { return m.id !== "me"; });
+      discover.push(copy);
+    });
+    return { mine: [], discover: discover };
+  }
+  E.prepareNewGuest = function (s) {
+    s.meals = [];
+    s.saved = [];
+    s.waterLog = [];
+    s.weightLog = [];
+    s.photos = [];
+    s.measurements = [];
+    s.chats = [];
+    s.requests = [];
+    s.blocked = [];
+    s.reports = [];
+    s.goals = [];
+    s.coachHistory = [];
+    s.payments = [];
+    s.dayStatus = {};
+    s.typing = null;
+    s.pendingCheckout = null;
+    s.communities = unjoinedCatalog();
+    s.user.isGuest = true;
+    s.user.isEmailVerified = false;
+    s.user.onboarded = false;
+    s.user.name = "Guest";
+    s.user.email = "";
+    s.user.chatReady = false;
+    s.user.discovery = false;
+    s.user.city = "";
+    s.user.bio = "";
+    s.user.photoSet = false;
+    s.user.training = [];
+    s.user.ai = false;
+    s.user.kidMode = false;
+    s.user.ageBlocked = false;
+    s.user.pregnancyStatus = null;
+    s.user.goal = "";
+    s.user.streak = { current: 0, best: 0, freezes: 0 };
+    s.user.subscription = { status: "free", plan: null, renewsAt: null, endsAt: null, trialUsed: false, provider: "App Store" };
+    s.onboarding = E.blankOnboarding();
+    s.ui.weightDraft = s.user.weightKg;
+    s.ui.editName = "Guest";
+    s.ui.editBio = "";
+    s.persona = "new";
+    return s;
+  };
+  E.newInstall = function () {
+    const s = E.prepareNewGuest(E.createState("fresh"));
+    s.user.isGuest = false;
+    s.user.name = "";
+    s.nav = { tab: "home", stack: [{ id: "welcome", transition: "fade" }] };
+    s.persona = "new";
+    return s;
+  };
+  E.freshOnboarding = function () {
+    const s = E.prepareNewGuest(E.createState("guest"));
+    s.nav = { tab: "home", stack: [{ id: "onboarding", transition: "fade" }] };
+    return s;
+  };
+  E.communityById = function (id) {
+    const bags = (E.state && E.state.communities) || { mine: [], discover: [] };
+    return (bags.mine || []).concat(bags.discover || []).find(function (c) { return c.id === id; }) || null;
+  };
 
   function weightSeries(start, endKg, days) {
     const out = [];
@@ -409,14 +517,15 @@ window.EatAI = window.EatAI || {};
   function shell() {
     const now = Date.now();
     return {
-      version: 1,
+      version: 2,
+      pendingCheckout: null,
       persona: "priya",
       nav: { tab: "home", stack: [{ id: "home", transition: "fade" }] },
       modal: null,
       toast: null,
       confirm: null,
       sheet: null,
-      flags: { scanLimit: false, cameraDenied: false, forceError: false, forceLoading: false, restoreFlip: false },
+      flags: { scanLimit: false, cameraDenied: false, forceError: false, forceLoading: false, restoreFlip: false, slowNet: false },
       ui: blankUi(),
       onboarding: E.blankOnboarding(),
       scan: null,
@@ -474,6 +583,8 @@ window.EatAI = window.EatAI || {};
       activity: "light",
       exercise: "3-4",
       diet: "veg",
+      pregnancyStatus: null,
+      kidMode: false,
       training: ["Yoga", "Walking"],
       discovery: true,
       city: "Bengaluru",
@@ -541,14 +652,31 @@ window.EatAI = window.EatAI || {};
       s.goals = [{ id: "g1", type: "lose", kcal: 1800, p: 120, c: 200, f: 60, from: "2026-09-01", to: null, manual: false, active: true }];
     } else if (persona === "teen") {
       s.user = userBase({
-        name: "Aarav Jain", email: "aarav@eat.ai", birthYear: 2011, birthMonth: 0, ageBlocked: true,
-        chatReady: false, discovery: false, color: "#D9F2FF"
+        name: "Aarav Jain", email: "aarav@eat.ai", birthYear: 2009, birthMonth: 0, ageBlocked: true,
+        chatReady: false, discovery: false, color: "#D9F2FF", goal: "health",
+        plan: { kcal: 2100, p: 110, c: 250, f: 65, manual: false }
       });
       s.prefs.privacy.discovery = false;
       s.meals = priyaMeals().slice(0, 2);
-      s.goals = [{ id: "g1", type: "health", kcal: 2000, p: 100, c: 240, f: 60, from: t, to: null, manual: false, active: true }];
-      s.user.goal = "health";
-      s.user.plan = { kcal: 2000, p: 100, c: 240, f: 60, manual: false };
+      s.goals = [{ id: "g1", type: "health", kcal: 2100, p: 110, c: 250, f: 65, from: t, to: null, manual: false, active: true }];
+    } else if (persona === "kid") {
+      s.user = userBase({
+        name: "Aman", email: "aman@eat.ai", birthYear: 2013, birthMonth: 2, ageBlocked: true, kidMode: true,
+        chatReady: false, discovery: false, color: "#D7F5C8", goal: "health", gender: "male",
+        plan: { kcal: 2000, p: 90, c: 250, f: 60, manual: false }
+      });
+      s.prefs.privacy.discovery = false;
+      s.meals = priyaMeals().slice(0, 1);
+      s.goals = [{ id: "g1", type: "health", kcal: 2000, p: 90, c: 250, f: 60, from: t, to: null, manual: false, active: true }];
+    } else if (persona === "sunita") {
+      s.user = userBase({
+        name: "Sunita Rao", email: "sunita@eat.ai", birthYear: 1966, gender: "female",
+        pregnancyStatus: "breastfeeding", goal: "health", color: "#FFE7C2",
+        plan: { kcal: 2300, p: 110, c: 270, f: 75, manual: false },
+        bio: "Keeping meals steady. Not chasing a smaller number."
+      });
+      s.meals = priyaMeals().slice(0, 2);
+      s.goals = [{ id: "g1", type: "health", kcal: 2300, p: 110, c: 270, f: 75, from: t, to: null, manual: false, active: true }];
     } else if (persona === "fresh") {
       s.user = userBase({
         name: "", email: "new@eat.ai", onboarded: false, chatReady: false, city: "", bio: "",
@@ -587,7 +715,7 @@ window.EatAI = window.EatAI || {};
       const raw = localStorage.getItem(KEY);
       if (!raw) return null;
       const data = JSON.parse(raw);
-      if (!data || data.version !== 1 || !data.user) return null;
+      if (!data || data.version !== 2 || !data.user) return null;
       data.modal = null; data.toast = null; data.confirm = null; data.sheet = null;
       if (!data.ui) data.ui = blankUi();
       data.ui.busy = null; data.ui.analyzing = false; data.typing = null;
@@ -684,5 +812,5 @@ window.EatAI = window.EatAI || {};
     };
   };
 
-  E.state = E.load() || E.createState("priya");
+  E.state = E.newInstall();
 })();

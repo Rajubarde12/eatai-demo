@@ -59,6 +59,11 @@
     if (E.state.lightbox) {
       html += '<div class="modal-wrap" style="background:#000;display:grid;place-items:center"><button type="button" class="backdrop" data-action="close-light"></button><img alt="" src="' + E.esc(E.state.lightbox) + '" style="max-width:92%;max-height:78%;position:relative;border-radius:16px"></div>';
     }
+    if (E.state.sheet && E.state.sheet.kind === "profile") {
+      html += '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-sheet"></button><div class="sheet action-sheet"><div class="grabber"></div>' +
+        '<button type="button" class="row-btn danger" data-action="report-profile">Report</button>' +
+        '<button type="button" class="row-btn danger" data-action="block-profile">Block</button></div></div>';
+    }
     if (E.state.sheet && E.state.sheet.kind === "msg") {
       html += '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-sheet"></button><div class="sheet action-sheet"><div class="grabber"></div>' +
         '<button type="button" class="row-btn" data-action="copy-msg">Copy</button>' +
@@ -299,7 +304,10 @@
     u.exercise = ob.exercise;
     u.diet = ob.diet;
     u.training = (ob.training || []).slice();
-    u.discovery = !!ob.discovery;
+    u.discovery = E.age(ob.year, ob.month) >= 18 && !!ob.discovery;
+    u.pregnancyStatus = ob.gender === "female" ? (ob.pregnancy || null) : null;
+    u.kidMode = E.protectedMode(ob) === "kid";
+    if (E.protectedMode(ob) || ob.goal === "health") u.goal = "health";
     u.plan = plan;
     u.onboarded = true;
     u.ageBlocked = E.age(ob.year, ob.month) < 18;
@@ -317,6 +325,26 @@
     E.render({ animate: true, transition: "fade" });
   }
 
+  function refreshScanTotals() {
+    const scan = E.state.scan;
+    if (!scan) return;
+    const totals = E.mealTotals(scan);
+    const plan = E.state.user.plan;
+    const after = plan.kcal - E.dayTotals(E.todayIso()).kcal - totals.kcal;
+    const kcalEl = document.getElementById("scan-meal-kcal");
+    const afterEl = document.getElementById("scan-meal-after");
+    const macroEl = document.getElementById("scan-meal-macros");
+    if (kcalEl) kcalEl.textContent = E.num(totals.kcal);
+    if (afterEl) afterEl.textContent = after >= 0
+      ? "After this meal you'll have " + E.num(after) + " kcal left."
+      : "After this meal you'll be " + E.num(Math.abs(after)) + " kcal over today. That's allowed.";
+    if (macroEl) macroEl.innerHTML = E.macros({ p: totals.p, c: totals.c, f: totals.f }, { p: Math.max(totals.p, 1), c: Math.max(totals.c, 1), f: Math.max(totals.f, 1) });
+    (scan.items || []).forEach(function (it, idx) {
+      const line = document.querySelector('[data-scan-macros="' + idx + '"]');
+      if (line) line.textContent = (it.serving || "") + " · P " + it.p + " · C " + it.c + " · F " + it.f;
+    });
+  }
+
   function applyModel(el) {
     const key = el.dataset.model;
     const val = el.type === "checkbox" ? el.checked : el.value;
@@ -328,6 +356,22 @@
     else if (key === "newEmail") ui.newEmail = val;
     else if (key === "describe") ui.describeText = val;
     else if (key === "scan-name" && E.state.scan) E.state.scan.name = val;
+    else if ((key === "item-name" || key === "item-kcal") && E.state.scan) {
+      const it = (E.state.scan.items || [])[Number(el.dataset.idx)];
+      if (it && key === "item-name") it.name = val;
+      if (it && key === "item-kcal") {
+        const n = Number(val);
+        if (!isNaN(n) && n >= 0) {
+          if (!it._base) it._base = { kcal: it.kcal || 1, p: it.p, c: it.c, f: it.f };
+          const ratio = n / Math.max(1, it._base.kcal);
+          it.kcal = n;
+          it.p = Math.round(it._base.p * ratio);
+          it.c = Math.round(it._base.c * ratio);
+          it.f = Math.round(it._base.f * ratio);
+          refreshScanTotals();
+        }
+      }
+    }
     else if (key === "chat-q") ui.chatQuery = val;
     else if (key === "disc-q") ui.discoverQuery = val;
     else if (key === "comm-q") ui.communityQuery = val;
@@ -339,6 +383,11 @@
     else if (key === "comm-name") ui.commName = val;
     else if (key === "comm-city") ui.commCity = val;
     else if (key === "comm-rules") ui.commRules = val;
+    else if (key === "comm-about") ui.commAbout = val;
+    else if (key === "offer-code") { ui.offerCode = val; ui.offerError = ""; }
+    else if (key === "reply-draft") ui.replyDraft = val;
+    else if (key === "post-draft") ui.postDraft = val;
+    else if (key === "custom-title") ui.customTitle = val;
     else if (key === "new-comm") ui.newComm = val;
     else if (key === "new-about") ui.newAbout = val;
     else if (key === "new-city") ui.newCity = val;
@@ -378,14 +427,37 @@
     }, 1000);
   }
 
+  let lastScan = null;
   async function runScan(builder) {
     if (lockedScan()) { openModal("paywall"); return; }
+    lastScan = builder;
+    E.state.ui.scanError = "";
+    E.state.ui.scanProgress = "Compressing photo…";
     E.state.ui.analyzing = true;
     E.render({ animate: false, keepScroll: true });
-    await sleep(2000);
+    await sleep(800);
+    if (E.state.flags.slowNet && E.current() && E.current().id === "scan") {
+      E.state.ui.scanProgress = "Still uploading on a slow connection…";
+      E.render({ animate: false, keepScroll: true });
+      await sleep(1400);
+      E.state.ui.analyzing = false;
+      E.state.ui.scanError = "This is taking too long. Check your connection and try again.";
+      E.render({ animate: false, keepScroll: true });
+      return;
+    }
+    await sleep(900);
     E.state.ui.analyzing = false;
+    E.state.ui.scanProgress = "";
     E.state.scan = builder();
     push("scan-result", {}, "up");
+  }
+  function resumePaywall() {
+    const pending = E.state.pendingCheckout;
+    if (!pending || !E.state.user || E.state.user.isGuest || !E.state.user.isEmailVerified) return false;
+    E.state.ui.selectedPlan = pending.plan || "yearly";
+    E.state.pendingCheckout = null;
+    E.state.modal = { id: "paywall" };
+    return true;
   }
 
   const actions = {
@@ -400,12 +472,8 @@
     },
     tab: function (el) { goTab(el.dataset.tab); },
     "guest-start": function () {
-      const fresh = E.createState("guest");
-      fresh.user.onboarded = false;
-      fresh.user.name = "Guest";
-      fresh.meals = [];
-      fresh.onboarding = E.blankOnboarding();
-      fresh.nav = { tab: "home", stack: [{ id: "onboarding", transition: "up" }] };
+      const fresh = E.freshOnboarding();
+      fresh.nav.stack[0].transition = "up";
       E.state = fresh;
       E.render({ animate: true, transition: "up" });
     },
@@ -422,6 +490,7 @@
       await sleep(800);
       const email = ui.email.trim().toLowerCase();
       const map = { "priya@eat.ai": "priya", "rahul@eat.ai": "rahul", "sam@demo.app": "sam", "aisha@eat.ai": "aisha" };
+      const pending = E.state.pendingCheckout;
       if (map[email]) E.state = E.createState(map[email]);
       else if (email.indexOf("unverified") >= 0) {
         E.state = E.createState("sam");
@@ -436,7 +505,9 @@
         E.state.onboarding.name = pretty;
         E.state.nav = { tab: "home", stack: [{ id: "onboarding" }] };
       }
+      if (pending) E.state.pendingCheckout = pending;
       toast("Welcome back");
+      if (resumePaywall()) toast("Pick up Pro where you left it");
       E.render({ animate: true, transition: "fade" });
     },
     register: async function () {
@@ -462,6 +533,7 @@
       E.state.user.isEmailVerified = false;
       E.state.ui.otp = ["", "", "", "", "", ""];
       E.state.ui.resendAt = Date.now() + 30000;
+      E.state.ui.otpExpiresAt = Date.now() + 60000;
       E.state.ui.busy = null;
       E.state.ui.authError = "";
       E.state.ui.editingEmail = false;
@@ -495,6 +567,11 @@
     },
     verify: async function () {
       const code = (E.state.ui.otp || []).join("");
+      if ((E.state.ui.otpExpiresAt || 0) && Date.now() > E.state.ui.otpExpiresAt) {
+        E.state.ui.authError = "This code has expired. Resend a new one.";
+        E.render({ animate: false, keepScroll: true });
+        return;
+      }
       if (code !== "123456") {
         E.state.ui.authError = "That code doesn't match. Use 123456 for this demo.";
         E.render({ animate: false, keepScroll: true });
@@ -509,11 +586,14 @@
       const next = E.state.user.onboarded ? "home" : "onboarding";
       E.state.nav = { tab: "home", stack: [{ id: next }] };
       toast("Email verified");
+      if (resumePaywall()) toast("Pick up Pro where you left it");
       E.render({ animate: true, transition: "fade" });
     },
     resend: function () {
       if ((E.state.ui.resendAt || 0) > Date.now()) return;
       E.state.ui.resendAt = Date.now() + 30000;
+      E.state.ui.otpExpiresAt = Date.now() + 60000;
+      E.state.ui.authError = "";
       toast("Code sent again");
       E.render({ animate: false, keepScroll: true });
     },
@@ -527,6 +607,7 @@
       E.state.user.email = E.state.ui.newEmail.trim();
       E.state.ui.editingEmail = false;
       E.state.ui.resendAt = Date.now() + 30000;
+      E.state.ui.otpExpiresAt = Date.now() + 60000;
       E.state.ui.otp = ["", "", "", "", "", ""];
       toast("Code sent to " + E.state.user.email);
       E.render({ animate: false, keepScroll: true });
@@ -536,9 +617,7 @@
       ask({ title: guest ? "Reset guest session?" : "Log out?", message: guest ? "This clears the guest demo on this device." : "You'll return to the welcome screen. This demo stays on your device.", ok: guest ? "Reset" : "Log out", danger: true, action: "do-logout" });
     },
     "do-logout": function () {
-      const next = E.createState("priya");
-      next.nav = { tab: "home", stack: [{ id: "welcome" }] };
-      E.state = next;
+      E.state = E.newInstall();
       toast("You're signed out");
       E.render({ animate: true, transition: "fade" });
     },
@@ -548,6 +627,11 @@
       const step = E.onboardingSteps(ob)[ob.i];
       const field = { goal: "goal", gender: "gender", pace: "pace", activity: "activity", exercise: "exercise", diet: "diet" }[step];
       if (field) ob[field] = el.dataset.value;
+      if (field === "gender" && ob.gender !== "female") ob.pregnancy = null;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "ob-preg": function (el) {
+      E.state.onboarding.pregnancy = el.dataset.value || null;
       E.render({ animate: false, keepScroll: true });
     },
     "ob-tag": function (el) {
@@ -656,6 +740,12 @@
       runScan(function () { return E.mealFromText(text); });
     },
     "open-paywall": function () { openModal("paywall"); },
+    "guest-pro": function () {
+      E.state.pendingCheckout = { plan: E.state.ui.selectedPlan || "yearly" };
+      E.state.modal = null;
+      push("register", {}, "right");
+    },
+    "retry-scan": function () { if (lastScan) runScan(lastScan); },
     "scan-qty": function (el) {
       const it = E.state.scan.items[Number(el.dataset.idx)];
       if (!it) return;
@@ -891,6 +981,66 @@
       toast("Chat is ready");
       E.render({ animate: true, transition: "fade" });
     },
+    "chat-next": function () {
+      const u = E.state.user;
+      const ui = E.state.ui;
+      const fields = E.pendingChatFields(u);
+      const field = fields[Math.min(ui.chatStep || 0, Math.max(0, fields.length - 1))];
+      if (field === "name") {
+        const n = (ui.editName || u.name || "").trim();
+        if (n.length < 2) { toast("Add your name", "err"); return; }
+        u.name = n;
+      }
+      if (field === "photo" && !u.photoSet) { toast("Add a photo first", "err"); return; }
+      if (field === "birth" && E.age(u.birthYear, u.birthMonth) < 18) {
+        u.ageBlocked = true;
+        toast("Chat stays closed until you're 18", "err");
+        return;
+      }
+      if (field === "tags" && !(u.training || []).length) { toast("Pick at least one tag", "err"); return; }
+      if (field === "discovery" && !u.discovery) { toast("Turn on Discover to continue", "err"); return; }
+      if (field === "city" && String(u.city || ui.cityQuery || "").trim().length < 2) { toast("Add your city", "err"); return; }
+      if (field === "city" && ui.cityQuery) u.city = ui.cityQuery;
+      if (field === "bio" && String(u.bio || "").trim().length < 10) { toast("Write a short bio, or skip", "err"); return; }
+      ui.chatStep = 0;
+      if (!E.pendingChatFields(u).length) {
+        u.chatReady = true;
+        toast("Chat is ready");
+      }
+      E.render({ animate: true, transition: "right" });
+    },
+    "chat-skip-bio": function () {
+      E.state.user.bioSkipped = true;
+      E.state.ui.chatStep = 0;
+      if (!E.pendingChatFields(E.state.user).length) {
+        E.state.user.chatReady = true;
+        toast("Chat is ready");
+      }
+      E.render({ animate: true, transition: "right" });
+    },
+    "profile-more": function (el) {
+      E.state.sheet = { kind: "profile", id: el.dataset.id };
+      E.render({ animate: false, keepScroll: true });
+    },
+    "report-profile": function () {
+      const id = (E.state.sheet || {}).id;
+      const p = (E.state.discover || []).find(function (d) { return d.id === id; });
+      E.state.sheet = null;
+      E.state.reports.unshift({ id: E.uid("rp"), name: p ? p.name : "Profile", reason: "Reported from profile", status: "Pending", date: E.todayIso() });
+      toast("Thanks for telling us. We'll review this profile.");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "block-profile": function () {
+      const id = (E.state.sheet || {}).id;
+      const p = (E.state.discover || []).find(function (d) { return d.id === id; });
+      E.state.sheet = null;
+      if (p) {
+        E.state.blocked.unshift({ id: p.id, name: p.name, color: p.color, initials: E.initials(p.name) });
+        E.state.discover = E.state.discover.filter(function (d) { return d.id !== p.id; });
+      }
+      toast(p ? "Blocked " + p.name : "Blocked");
+      pop();
+    },
     "open-modal": function (el) { openModal(el.dataset.modal); },
     "pick-member": function (el) {
       const picks = E.state.ui.groupPicks;
@@ -918,7 +1068,7 @@
     "submit-community": function () {
       const name = (E.state.ui.newComm || "").trim();
       if (!name) { toast("Add a community name", "err"); return; }
-      const c = { id: E.uid("cm"), name: name, city: E.state.ui.newCity || "Bengaluru", members: 1, admin: true, hue: 100, description: E.state.ui.newAbout || "A new demo community.", rules: "Be kind. No dating pitches.", posts: [{ id: E.uid("p"), author: "You", text: "Community created. This feed stays on your device.", time: "now" }] };
+      const c = { id: E.uid("cm"), name: name, city: E.state.ui.newCity || "Bengaluru", members: 1, admin: true, joined: true, hue: 100, description: E.state.ui.newAbout || "A new demo community.", rules: "Be kind. No dating pitches.", memberList: [{ id: "me", name: "You", role: "admin" }], pending: [], posts: [{ id: E.uid("p"), author: "You", text: "Community created. This feed stays on your device.", time: "now", likes: 0, liked: false, replies: [] }] };
       E.state.communities.mine.unshift(c);
       E.state.modal = null;
       E.state.ui.communityTab = "mine";
@@ -932,15 +1082,122 @@
       if (c) c.visibility = el.dataset.value;
       E.render({ animate: false, keepScroll: true });
     },
-    "save-community": function () {
-      const c = (E.state.communities.mine || []).find(function (x) { return x.id === E.currentParams().id; }) || E.state.communities.mine[0];
+    "save-community": function (el) {
+      const c = E.communityById((el && el.dataset.id) || E.currentParams().id);
       if (c) {
         if (E.state.ui.commName) c.name = E.state.ui.commName;
-        if (E.state.ui.commCity) c.city = E.state.ui.commCity;
-        if (E.state.ui.commRules) c.rules = E.state.ui.commRules;
+        if (E.state.ui.commAbout) c.description = E.state.ui.commAbout;
+        if (E.state.ui.commRules != null && E.state.ui.commRules !== "") c.rules = E.state.ui.commRules;
       }
-      toast("Community saved");
+      toast("Community updated");
       E.render({ animate: false, keepScroll: true });
+    },
+    "comm-view": function (el) { E.state.ui.commView = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "toggle-near": function () { E.state.ui.nearMe = !E.state.ui.nearMe; E.render({ animate: false, keepScroll: true }); },
+    "join-community": function (el) {
+      const c = E.communityById(el.dataset.cid);
+      if (!c) return;
+      if (c.visibility === "private") {
+        c.pending = c.pending || [];
+        if (!c.pending.some(function (m) { return m.id === "me-req"; })) c.pending.push({ id: "me-req", name: "You" });
+        toast("Request sent. An admin will approve it.");
+        E.render({ animate: false, keepScroll: true });
+        return;
+      }
+      c.joined = true;
+      c.members += 1;
+      c.memberList = c.memberList || [];
+      if (!c.memberList.some(function (m) { return m.id === "me"; })) c.memberList.unshift({ id: "me", name: "You", role: "member" });
+      if (!E.state.communities.mine.some(function (x) { return x.id === c.id; })) E.state.communities.mine.unshift(c);
+      toast(c.visibility === "private" ? "Request sent" : "You're in");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "leave-community": function (el) {
+      const c = E.communityById(el.dataset.cid);
+      if (!c) return;
+      c.joined = false;
+      c.members = Math.max(1, c.members - 1);
+      c.memberList = (c.memberList || []).filter(function (m) { return m.id !== "me"; });
+      E.state.communities.mine = E.state.communities.mine.filter(function (x) { return x.id !== c.id; });
+      if (!E.state.communities.discover.some(function (x) { return x.id === c.id; })) E.state.communities.discover.unshift(c);
+      toast("You left " + c.name);
+      pop();
+    },
+    "like-post": function (el) {
+      const c = E.communityById(el.dataset.cid);
+      const post = c && (c.posts || []).find(function (p) { return p.id === el.dataset.id; });
+      if (!post) return;
+      post.liked = !post.liked;
+      post.likes = Math.max(0, (post.likes || 0) + (post.liked ? 1 : -1));
+      E.render({ animate: false, keepScroll: true });
+    },
+    "toggle-replies": function (el) {
+      E.state.ui.openPost = E.state.ui.openPost === el.dataset.id ? "" : el.dataset.id;
+      E.state.ui.replyDraft = "";
+      E.render({ animate: false, keepScroll: true });
+    },
+    "send-reply": function (el) {
+      const text = (E.state.ui.replyDraft || "").trim();
+      if (!text) { toast("Write a reply", "err"); return; }
+      const c = E.communityById(el.dataset.cid);
+      const post = c && (c.posts || []).find(function (p) { return p.id === el.dataset.id; });
+      if (!post) return;
+      post.replies = post.replies || [];
+      post.replies.push({ id: E.uid("rp"), author: "You", text: text });
+      E.state.ui.replyDraft = "";
+      E.render({ animate: false, keepScroll: true });
+    },
+    "community-post": function (el) {
+      const text = (E.state.ui.postDraft || "").trim();
+      if (!text) { toast("Write something first", "err"); return; }
+      const c = E.communityById(el.dataset.cid);
+      if (!c || !c.joined) { toast("Join to post", "err"); return; }
+      c.posts = c.posts || [];
+      c.posts.unshift({ id: E.uid("p"), author: "You", text: text, time: "now", likes: 0, liked: false, replies: [] });
+      E.state.ui.postDraft = "";
+      toast("Posted");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "approve-member": function (el) {
+      const c = E.communityById(el.dataset.cid);
+      const req = c && (c.pending || []).find(function (m) { return m.id === el.dataset.id; });
+      if (!c || !req) return;
+      c.pending = c.pending.filter(function (m) { return m.id !== req.id; });
+      c.memberList = c.memberList || [];
+      c.memberList.push({ id: req.id, name: req.name, role: "member" });
+      c.members += 1;
+      toast("Approved " + req.name);
+      E.render({ animate: false, keepScroll: true });
+    },
+    "reject-member": function (el) {
+      const c = E.communityById(el.dataset.cid);
+      if (!c) return;
+      c.pending = (c.pending || []).filter(function (m) { return m.id !== el.dataset.id; });
+      toast("Request declined");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "remove-member": function (el) {
+      ask({ title: "Remove member?", message: "They will lose access to this community.", ok: "Remove", danger: true, action: "do-remove-member", id: el.dataset.id, cid: el.dataset.cid });
+    },
+    "do-remove-member": function (cfn) {
+      const c = E.communityById(cfn.cid);
+      if (!c) return;
+      c.memberList = (c.memberList || []).filter(function (m) { return m.id !== cfn.id; });
+      c.members = Math.max(1, c.members - 1);
+      toast("Member removed");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "ask-archive": function (el) {
+      ask({ title: "Archive community?", message: "Members will lose access. This cannot be undone from the app.", ok: "Archive", danger: true, action: "do-archive", id: el.dataset.id });
+    },
+    "do-archive": function (cfn) {
+      const c = E.communityById(cfn.id);
+      if (c) c.archived = true;
+      E.state.communities.mine = E.state.communities.mine.filter(function (x) { return !x.archived; });
+      toast("Community archived");
+      E.state.nav.stack = E.state.nav.stack.filter(function (s) { return s.id !== "community" && s.id !== "community-settings"; });
+      if (!E.state.nav.stack.length) E.state.nav.stack = [{ id: "communities" }];
+      E.render({ animate: true, transition: "fade" });
     },
     "share-meal": function (el) {
       E.state.ui.shareChat = null;
@@ -963,23 +1220,32 @@
     },
     "pick-plan": function (el) { E.state.ui.selectedPlan = el.dataset.id; E.render({ animate: false, keepScroll: true }); },
     buy: async function () {
-      if (E.state.user.isGuest) { push("register"); return; }
+      if (E.state.user.isGuest) {
+        E.state.pendingCheckout = { plan: E.state.ui.selectedPlan || "yearly" };
+        push("register");
+        return;
+      }
       if (!E.state.user.isEmailVerified) { toast("Verify your email before subscribing", "err"); return; }
       E.state.ui.busy = "buy";
       E.render({ animate: false, keepScroll: true });
       await sleep(1200);
       const plan = E.state.ui.selectedPlan || "yearly";
       const sub = E.state.user.subscription;
+      const razor = E.state.ui.billingProvider === "razorpay";
       sub.status = "active";
-      sub.plan = plan;
+      sub.plan = plan === "sixmonth" ? "half" : plan;
+      sub.provider = razor ? "Razorpay" : "App Store";
       sub.trialUsed = true;
-      sub.renewsAt = E.iso(E.addDays(plan === "yearly" ? 365 : 30));
+      sub.renewsAt = E.iso(E.addDays(plan === "yearly" ? 365 : plan === "sixmonth" ? 180 : 30));
       sub.endsAt = null;
-      const amount = plan === "yearly" ? 1999 : 299;
-      E.state.payments.unshift({ date: E.todayIso(), amount: amount, status: "Paid", plan: plan === "yearly" ? "Yearly" : "Monthly" });
+      const base = plan === "yearly" ? 1999 : plan === "sixmonth" ? 999 : 299;
+      const amount = E.state.ui.offerOff ? Math.round(base * (1 - E.state.ui.offerOff)) : base;
+      E.state.pendingCheckout = null;
+      E.state.payments.unshift({ date: E.todayIso(), amount: amount, status: "Paid", plan: plan });
       E.state.ui.busy = null;
       E.state.modal = null;
-      ask({ title: "You're on Pro", message: (plan === "yearly" ? "Yearly" : "Monthly") + " plan is active in this demo. You were not charged.", ok: "Nice", hideCancel: true, action: "noop-render" });
+      const label = plan === "yearly" ? "Yearly" : plan === "sixmonth" ? "6-month" : "Monthly";
+      ask({ title: "You're on Pro", message: label + " plan is active via " + (razor ? "Razorpay" : "the store") + ". You were not charged.", ok: "Nice", hideCancel: true, action: "noop-render" });
     },
     trial: function () {
       const sub = E.state.user.subscription;
@@ -1010,7 +1276,36 @@
       sub.status = "cancelled";
       sub.renewsAt = null;
       sub.endsAt = E.iso(E.addDays(30));
-      toast("Subscription cancelled");
+      toast(sub.provider === "Razorpay" ? "Auto-renew cancelled. Pro stays until the end date." : "Cancel in the store. Pro stays until the end date.");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "resume-sub": function () {
+      const sub = E.state.user.subscription;
+      if (sub.provider !== "Razorpay" || sub.status !== "cancelled") {
+        toast("Nothing to resume");
+        return;
+      }
+      sub.status = "active";
+      sub.renewsAt = sub.endsAt;
+      sub.endsAt = null;
+      toast("Pro is active again");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "billing-provider": function (el) {
+      E.state.ui.billingProvider = el.dataset.value;
+      if (el.dataset.value !== "razorpay") { E.state.ui.offerOff = 0; E.state.ui.offerError = ""; }
+      E.render({ animate: false, keepScroll: true });
+    },
+    "apply-offer": function () {
+      const code = (E.state.ui.offerCode || "").trim().toUpperCase();
+      if (code === "SAVE20") {
+        E.state.ui.offerOff = 0.2;
+        E.state.ui.offerError = "";
+        toast("20% off applied");
+      } else {
+        E.state.ui.offerOff = 0;
+        E.state.ui.offerError = "That code doesn't match a live offer.";
+      }
       E.render({ animate: false, keepScroll: true });
     },
     "store-link": function () { toast("Would open store subscriptions"); },
@@ -1033,6 +1328,26 @@
     },
     "coach-time": function (el) { E.state.prefs.coach.time = el.dataset.value; toast("Coach time saved"); E.render({ animate: false, keepScroll: true }); },
     "photo-time": function (el) { E.state.prefs.photos.time = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "photo-day": function (el) { E.state.prefs.photos.day = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "water-start": function (el) { E.state.prefs.water.reminderStart = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "water-end": function (el) { E.state.prefs.water.reminderEnd = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "weighin-day": function (el) { E.state.prefs.units.weighInDay = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "weighin-time": function (el) { E.state.prefs.units.weighInTime = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "custom-time": function (el) { E.state.ui.customTime = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "add-reminder": function () {
+      const title = (E.state.ui.customTitle || "").trim();
+      if (!title) { toast("Name the reminder", "err"); return; }
+      E.state.prefs.reminders.custom = E.state.prefs.reminders.custom || [];
+      E.state.prefs.reminders.custom.push({ id: E.uid("rm"), title: title, time: E.state.ui.customTime || "15:00", on: true });
+      E.state.ui.customTitle = "";
+      toast("Custom reminder added");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "toggle-reminder": function (el) {
+      const row = (E.state.prefs.reminders.custom || []).find(function (r) { return r.id === el.dataset.id; });
+      if (row) row.on = !row.on;
+      E.render({ animate: false, keepScroll: true });
+    },
     "streak-mode": function (el) { E.state.prefs.streak.mode = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
     "unit-weight": function (el) { E.state.prefs.units.weight = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
     "unit-length": function (el) { E.state.prefs.units.length = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
@@ -1059,12 +1374,36 @@
       const p = ui.tP != null ? ui.tP : plan.p;
       const c = ui.tC != null ? ui.tC : plan.c;
       const f = ui.tF != null ? ui.tF : plan.f;
-      E.state.user.plan = { kcal: kcal, p: p, c: c, f: f, manual: true };
-      toast("Targets saved");
+      const custom = (E.state.ui.macroMode || "auto") === "custom";
+      E.state.user.plan = { kcal: kcal, p: p, c: c, f: f, manual: custom };
+      toast(custom ? "Custom macros saved" : "Auto plan saved");
       E.render({ animate: false, keepScroll: true });
     },
     "restore-plan": function (el) {
       ask({ title: "Restore this plan?", message: "Today's targets switch to the older numbers. You can edit them again.", ok: "Restore", action: "do-restore", id: el.dataset.id });
+    },
+    "ask-delete-goal": function (el) {
+      ask({ title: "Delete this goal?", message: "It will be removed from your history. Your active plan stays.", ok: "Delete", danger: true, action: "do-delete-goal", id: el.dataset.id });
+    },
+    "do-delete-goal": function (cfn) {
+      E.state.goals = (E.state.goals || []).filter(function (g) { return g.id !== cfn.id || g.active; });
+      toast("Goal removed from history");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "macro-mode": function (el) {
+      E.state.ui.macroMode = el.dataset.value;
+      if (el.dataset.value === "auto") {
+        const u = E.state.user;
+        const plan = E.calcPlan({
+          year: u.birthYear, month: u.birthMonth, gender: u.gender, goal: u.goal,
+          pregnancy: u.pregnancyStatus, activity: u.activity, exercise: u.exercise, pace: u.pace
+        });
+        E.state.ui.tKcal = plan.kcal;
+        E.state.ui.tP = plan.p;
+        E.state.ui.tC = plan.c;
+        E.state.ui.tF = plan.f;
+      }
+      E.render({ animate: false, keepScroll: true });
     },
     "do-restore": function (c) {
       const g = (E.state.goals || []).find(function (x) { return x.id === c.id; });
@@ -1121,12 +1460,7 @@
       E.render({ animate: false, keepScroll: true });
     },
     "download-data": function () {
-      const blob = new Blob([JSON.stringify(E.state, null, 2)], { type: "application/json" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "eatai-demo-data.json";
-      a.click();
-      toast("Download started");
+      toast("Export queued. We'll email a download link within 24 hours.");
     },
     "cancel-deletion": function () {
       E.state.user.deletion = null;
@@ -1171,8 +1505,9 @@
     },
     "reset-demo": function () {
       localStorage.removeItem("eatai-demo-v1");
-      E.state = E.createState("priya");
-      toast("Demo reset to Priya");
+      localStorage.removeItem("eatai-demo-v2");
+      E.state = E.newInstall();
+      toast("Fresh start");
       E.render({ animate: true, transition: "fade" });
     },
     "retry-load": function () {
@@ -1325,8 +1660,13 @@
     fit();
     tickClock();
     const q = new URLSearchParams(location.search);
-    if (q.get("reset") === "1") E.state = E.createState("priya");
+    try {
+      localStorage.removeItem("eatai-demo-v1");
+      localStorage.removeItem("eatai-demo-v2");
+    } catch (err) { /* private mode */ }
     if (q.get("persona")) E.state = E.createState(q.get("persona"));
+    else if (q.get("reset") === "1") E.state = E.createState("priya");
+    else E.state = E.newInstall();
     if (q.get("screen")) {
       const id = q.get("screen");
       if (id === "paywall") {

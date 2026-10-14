@@ -48,7 +48,9 @@
       E.macroDots(plan) + '<div class="grid2 mt12">' +
       E.btn("Goals & history", { size: "sm", attrs: 'data-action="go" data-screen="goals"' }) +
       E.btn("Edit targets", { size: "sm", variant: "secondary", attrs: 'data-action="go" data-screen="edit-targets"' }) +
-      '</div><div class="caption mt12">' + u.weightKg + " kg · " + u.heightCm + " cm</div></div>" +
+      '</div><div class="caption mt12">' + u.weightKg + " kg · " + u.heightCm + " cm" +
+      (u.kidMode ? " · Kid-friendly, no dieting target" : u.pregnancyStatus === "breastfeeding" ? " · Breastfeeding, about +300 kcal" : u.pregnancyStatus === "pregnant" ? " · Pregnancy, maintenance only" : "") +
+      "</div></div>" +
       proCard +
       '<div class="card mt12 between"><div class="grow"><div class="heading" style="font-size:15px">AI Processing</div><div class="caption">Photo estimates stay on this demo device until you allow them.</div></div>' +
       E.switch(!!u.ai, 'data-action="ai-toggle"') + "</div>" +
@@ -60,7 +62,7 @@
       '<div class="overline mt24">Account</div><div class="list-card mt8">' +
       E.navRow("log-out", u.isGuest ? "Reset guest session" : "Log out", u.isGuest ? "Clears this demo guest" : "You'll return to the welcome screen", 'data-action="ask-logout"') +
       '<button type="button" class="nav-row" data-action="go" data-screen="delete-account"><span class="ico-sq">' + E.icon("trash-2") + '</span><span class="grow"><span class="heading danger" style="font-size:15px">Delete account</span><span class="caption" style="display:block">' + (u.deletion ? "Deletion scheduled" : "30-day grace period · full details") + "</span></span>" + E.icon("chevron-right") + "</button></div>" +
-      '<button type="button" class="center mt24 caption" data-longpress="dev" style="width:100%;border:0;background:transparent;padding:12px">Version <b class="lime" style="color:var(--ink);background:var(--lime);border-radius:8px;padding:2px 6px">1.0.0</b></button>';
+      '<button type="button" class="center mt24 caption" data-longpress="dev" style="width:100%;border:0;background:transparent;padding:12px">Version <b class="lime" style="color:var(--ink);background:var(--lime);border-radius:8px;padding:2px 6px">2.0.7</b></button>';
     return E.page({ tab: true, body: body });
   };
 
@@ -77,7 +79,8 @@
       (past.length ? past.map(function (h) {
         const meta = E.goalMeta[h.type] || g;
         return '<div class="card mt12"><div class="between"><div><div class="heading" style="font-size:15px">' + meta.emoji + " " + meta.label + '</div><div class="caption">' + E.esc(h.from) + (h.to ? " – " + h.to : "") + " · " + h.kcal + ' kcal</div></div>' +
-          E.btn("Restore", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="restore-plan" data-id="' + h.id + '"' }) + "</div></div>";
+          E.btn("Restore", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="restore-plan" data-id="' + h.id + '"' }) +
+          E.btn("Delete", { size: "sm", variant: "ghost", block: false, attrs: 'data-action="ask-delete-goal" data-id="' + h.id + '"' }) + "</div></div>";
       }).join("") : E.empty({ emoji: "📜", title: "No earlier plans", sub: "Recalculate once and the previous plan lands here." })));
     return E.page({ top: E.topTitle("Goals & history"), pull: true, body: body });
   };
@@ -85,6 +88,17 @@
   E.screens["edit-targets"] = function () {
     const p = E.state.user.plan;
     const ui = E.state.ui;
+    const mode = ui.macroMode || (p.manual ? "custom" : "auto");
+    ui.macroMode = mode;
+    const locked = mode !== "custom";
+    const prot = E.protectedMode(E.state.user);
+    const note = prot === "kid"
+      ? "Under-16 plans stay on maintenance. You can nudge macros inside a safe range."
+      : prot === "pregnant" || prot === "breastfeeding"
+        ? "Pregnancy and breastfeeding plans stay on maintenance. No deficit targets."
+        : mode === "auto"
+          ? "Auto keeps the engine’s suggestion. Switch to Custom to fine-tune."
+          : "Custom targets — Home will use these daily.";
     const kcal = ui.tKcal != null ? ui.tKcal : p.kcal;
     const pr = ui.tP != null ? ui.tP : p.p;
     const c = ui.tC != null ? ui.tC : p.c;
@@ -97,11 +111,14 @@
         E.iconBtn("plus", 'data-action="target-step" data-key="' + key + '" data-dir="1"', "ink") + "</div></div>";
     };
     return E.page({
-      top: E.topTitle("Edit targets", "Manual daily limits"),
-      body: field("Calories", "tKcal", kcal) + field("Protein g", "tP", pr) + field("Carbs g", "tC", c) + field("Fats g", "tF", f) +
-        '<p class="caption mt12">Macros add up to about ' + E.num(sum) + " kcal. " + (off ? "That's more than 10% off the calorie target — nudge one side." : "Within 10%. Good to save.") + "</p>" +
-        '<div class="mt16">' + E.btn("Save targets", { disabled: off, attrs: 'data-action="save-targets"' }) + "</div>" +
-        '<div class="mt8">' + E.btn("Recalculate from body stats", { variant: "ghost", attrs: 'data-action="recalc"' }) + "</div>"
+      top: E.topTitle("Edit targets", mode === "custom" ? "Custom daily limits" : "Auto daily limits"),
+      body: '<div class="mt4">' + E.segmented([{ id: "auto", label: "Auto" }, { id: "custom", label: "Custom" }], mode, "macro-mode") + "</div>" +
+        '<p class="caption mt12">' + note + "</p>" +
+        '<div style="' + (locked ? "opacity:.55;pointer-events:none" : "") + '">' +
+        field("Calories", "tKcal", kcal) + field("Protein g", "tP", pr) + field("Carbs g", "tC", c) + field("Fats g", "tF", f) + "</div>" +
+        '<p class="caption mt12">Macros add up to about ' + E.num(sum) + " kcal. " + (mode === "custom" && off ? "That's more than 10% off the calorie target — nudge one side." : "Within 10%. Good to save.") + "</p>" +
+        '<div class="mt16">' + E.btn("Save targets", { disabled: mode === "custom" && off, attrs: 'data-action="save-targets"' }) + "</div>" +
+        '<div class="mt8">' + E.btn("Reset from body stats", { variant: "ghost", attrs: 'data-action="recalc"' }) + "</div>"
     });
   };
 
@@ -120,7 +137,8 @@
       body: '<div class="card"><div class="overline">Current plan</div><div class="title mt8">' + name + '</div><div class="caption mt8">' + status + " · " + E.esc(sub.provider || "App Store") + "</div><div class=\"body mt8\">" + when + (days != null ? " · " + days + " days left" : "") + "</div></div>" +
         '<div class="stack mt16">' +
         E.btn("Change plan", { attrs: 'data-action="open-paywall"' }) +
-        (pro && sub.status !== "cancelled" ? E.btn("Cancel subscription", { variant: "secondary", attrs: 'data-action="ask-cancel"' }) : "") +
+        (pro && sub.status !== "cancelled" ? E.btn(sub.provider === "Razorpay" ? "Cancel auto-renew" : "Cancel in the store", { variant: "secondary", attrs: 'data-action="ask-cancel"' }) : "") +
+        (sub.status === "cancelled" && sub.provider === "Razorpay" ? E.btn("Resume Pro", { attrs: 'data-action="resume-sub"' }) : "") +
         E.btn("Restore purchases", { variant: "secondary", attrs: 'data-action="restore"' }) +
         E.btn("Open store subscriptions", { variant: "ghost", attrs: 'data-action="store-link"' }) +
         "</div><div class=\"overline mt20\">Payment history</div><div class=\"card mt8\">" + history + "</div>"
@@ -131,24 +149,34 @@
     const u = E.state.user;
     const pro = E.isPro();
     const plan = E.state.ui.selectedPlan || "yearly";
+    const off = E.state.ui.offerOff || 0;
+    const priceOf = function (n) { return off ? "₹" + E.num(Math.round(n * (1 - off))) : "₹" + E.num(n); };
     const plans = [
-      { id: "yearly", name: "Yearly", price: "₹1,999", per: "₹167 / month", note: "Best value" },
-      { id: "monthly", name: "Monthly", price: "₹299", per: "Billed monthly", note: "" }
+      { id: "yearly", name: "Yearly", price: priceOf(1999), per: "₹167 / month", note: "Best value" },
+      { id: "sixmonth", name: "6 months", price: priceOf(999), per: "₹167 / month", note: "" },
+      { id: "monthly", name: "Monthly", price: priceOf(299), per: "Billed monthly", note: "" }
     ];
     if (u.isGuest) {
-      return '<div class="paywall"><button type="button" class="icon-btn on-photo" data-action="close-modal">' + E.icon("x") + '</button><div class="title mt20">Create an account first</div><p class="body mt8" style="color:rgba(255,255,255,.7)">Subscriptions sit on an account so you can restore them later. This demo never charges you.</p><div class="mt20">' +
-        E.btn("Create free account", { variant: "accent", attrs: 'data-action="go" data-screen="register"' }) + "</div></div>";
+      return '<div class="paywall"><button type="button" class="icon-btn on-photo" data-action="close-modal">' + E.icon("x") + '</button><div class="title mt20">Create an account first</div><p class="body mt8" style="color:rgba(255,255,255,.7)">We will bring you back to this plan after the account is ready. This demo never charges you.</p><div class="mt20">' +
+        E.btn("Create free account", { variant: "accent", attrs: 'data-action="guest-pro"' }) + "</div></div>";
     }
+    const provider = E.state.ui.billingProvider || "store";
+    const razor = provider === "razorpay";
     const perks = [["scan", "Unlimited AI photo and text scans"], ["barcode", "Barcode scanner"], ["sparkles", "Daily AI coach"], ["trending-up", "Weight trend and weekly reports"], ["droplet", "Water, streaks and saved meals"]];
+    const chosen = plans.find(function (p) { return p.id === plan; }) || plans[0];
+    const offer = razor ? '<div class="mt12">' + E.field({ label: "Offer code", id: "offer", model: "offer-code", value: E.state.ui.offerCode, placeholder: "SAVE20" }) +
+      (E.state.ui.offerError ? '<p class="field-error mt8">' + E.esc(E.state.ui.offerError) + "</p>" : "") +
+      '<div class="mt8">' + E.btn(off ? "Offer applied · 20% off" : "Apply code", { size: "md", variant: "light", attrs: 'data-action="apply-offer"' }) + "</div></div>" : "";
     return '<div class="paywall"><div class="between"><button type="button" class="icon-btn" style="background:rgba(255,255,255,.12);color:white" data-action="close-modal" aria-label="Close">' + E.icon("x") + '</button><span class="gold">EATAI PRO</span><span style="width:44px"></span></div>' +
       '<div class="display mt12" style="font-size:34px">' + (pro ? "You're on Pro" : "Hit your goals 2× faster") + "</div>" +
+      '<div class="mt12">' + E.segmented([{ id: "store", label: "App Store / Play" }, { id: "razorpay", label: "Razorpay" }], provider, "billing-provider") + "</div>" +
       '<div class="mt16">' + perks.map(function (p) { return '<div class="row gap12" style="padding:6px 0"><span class="ico-sq" style="background:rgba(255,255,255,.08);color:var(--lime)">' + E.icon(p[0] === "barcode" ? "scan-barcode" : p[0]) + '</span><span>' + p[1] + "</span></div>"; }).join("") + "</div>" +
-      '<div class="grid2 mt12">' + plans.map(function (p) {
+      '<div class="mt12" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">' + plans.map(function (p) {
         return '<button type="button" class="plan ' + (plan === p.id ? "on" : "") + '" data-action="pick-plan" data-id="' + p.id + '"><div class="caption" style="color:#e6c56a">' + p.note + '</div><div class="label">' + p.name + '</div><b>' + p.price + '</b><div class="caption" style="color:rgba(255,255,255,.65)">' + p.per + "</div></button>";
-      }).join("") + "</div>" +
-      '<div class="mt12">' + E.btn(pro ? "You're subscribed" : "Continue · " + (plan === "yearly" ? "₹1,999/year" : "₹299/month"), { variant: "accent", disabled: pro, busy: E.state.ui.busy === "buy", attrs: 'data-action="buy"' }) + "</div>" +
-      (!u.subscription.trialUsed && !pro ? '<div class="mt8">' + E.btn("Start 3-day free trial", { variant: "light", attrs: 'data-action="trial"' }) + "</div>" : "") +
-      '<p class="caption center mt12" style="color:rgba(255,255,255,.55)">Demo only — you won\'t be charged. Restore purchases · Cancel anytime in Subscription. Billed via App Store / Play Store (simulated).</p></div>';
+      }).join("") + "</div>" + offer +
+      '<div class="mt12">' + E.btn(pro ? "You're subscribed" : "Continue · " + chosen.price, { variant: "accent", disabled: pro, busy: E.state.ui.busy === "buy", attrs: 'data-action="buy"' }) + "</div>" +
+      (!u.subscription.trialUsed && !pro && !razor ? '<div class="mt8">' + E.btn("Start 3-day free trial", { variant: "light", attrs: 'data-action="trial"' }) + "</div>" : "") +
+      '<p class="caption center mt12" style="color:rgba(255,255,255,.55)">Demo only — you won\'t be charged. Billed via ' + (razor ? "Razorpay" : "App Store / Play") + ". Offer codes work on Razorpay. SAVE20 is 20% off.</p></div>";
   };
 
   E.modals["ai-consent"] = function () {
@@ -183,10 +211,12 @@
   }
   E.screens["settings-water"] = function () {
     const w = E.state.prefs.water;
-    return settingsShell("Water", "Glass size, target, reminders",
-      '<div class="list-card">' + rowToggle("Reminders", "A nudge to drink", w.reminders, "prefs.water.reminders") + "</div>" +
+    return settingsShell("Water", "Glass size, daily target, and reminders",
+      '<div class="list-card">' + rowToggle("Water reminders", "Nudge you to drink during the day", w.reminders, "prefs.water.reminders") +
+      rowToggle("Smart reminders", "Skip nudges when you're already on track (Pro)", w.smart, "prefs.water.smart", !E.isPro()) + "</div>" +
       stepCard("Glass size", w.glassMl + " ml", "glass") + stepCard("Daily target", w.target + " glasses", "wtarget") +
-      '<div class="mt12">' + E.field({ label: "Reminder time", id: "wt", model: "water-time", value: w.reminderTime }) + "</div>");
+      '<div class="overline mt16">Window start</div><div class="mt8">' + E.chips(["06:00", "08:00", "10:00"], w.reminderStart || "08:00", "water-start") + "</div>" +
+      '<div class="overline mt16">Window end</div><div class="mt8">' + E.chips(["20:00", "21:00", "22:00"], w.reminderEnd || "22:00", "water-end") + "</div>");
   };
   function stepCard(label, value, key) {
     return '<div class="card mt12 between"><div><div class="caption">' + label + '</div><div class="heading">' + value + '</div></div><div class="row gap8">' +
@@ -206,14 +236,17 @@
     return settingsShell("Tracking & units", "Weight, length, adaptive calories",
       '<div class="overline">Weight</div><div class="mt8">' + E.segmented([{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }], u.weight, "unit-weight") + "</div>" +
       '<div class="overline mt16">Length</div><div class="mt8">' + E.segmented([{ id: "cm", label: "cm" }, { id: "ft", label: "ft" }], u.length, "unit-length") + "</div>" +
-      '<div class="list-card mt16">' + rowToggle("Adaptive calories", "Nudge the target after a heavy week", u.adaptive, "prefs.units.adaptive") + "</div>" +
-      '<div class="overline mt16">Weigh-in</div><div class="mt8">' + E.chips(["Morning", "Evening"], u.weighIn === "evening" ? "Evening" : "Morning", "weighin") + "</div>");
+      '<div class="list-card mt16">' + rowToggle("Adaptive macros", "Gently adjust targets from weigh-in trends (Pro)", u.adaptive, "prefs.units.adaptive", !E.isPro()) + "</div>" +
+      '<div class="list-card mt16">' + rowToggle("Weekly weigh-in reminder", (u.weighInDay || "sun") + " · " + (u.weighInTime || "08:00"), u.weighInOn !== false, "prefs.units.weighInOn") + "</div>" +
+      '<div class="overline mt16">Reminder day</div><div class="mt8">' + E.chips(["sun", "mon", "tue", "wed", "thu", "fri", "sat"], u.weighInDay || "sun", "weighin-day") + "</div>" +
+      '<div class="overline mt16">Reminder time</div><div class="mt8">' + E.chips(["06:00", "07:00", "08:00", "09:00"], u.weighInTime || "08:00", "weighin-time") + "</div>");
   };
   E.screens["settings-photos"] = function () {
     const p = E.state.prefs.photos;
     return settingsShell("Progress photo alerts", "Weekly reminder and export",
-      '<div class="list-card">' + rowToggle("Weekly reminder", "Same corner, same light", p.weekly, "prefs.photos.weekly") + "</div>" +
-      '<div class="mt12">' + E.chips(["08:00", "18:00", "21:00"], p.time, "photo-time") + "</div>" +
+      '<div class="list-card">' + rowToggle("Weekly photo reminder", (p.day || "sun") + " · " + (p.time || "09:00"), p.weekly, "prefs.photos.weekly", !E.isPro()) + "</div>" +
+      '<div class="overline mt16">Reminder day</div><div class="mt8">' + E.chips(["sun", "mon", "wed", "fri"], p.day || "sun", "photo-day") + "</div>" +
+      '<div class="mt12">' + E.chips(["07:00", "09:00", "18:00"], p.time, "photo-time") + "</div>" +
       '<div class="mt16">' + E.btn("Export gallery (demo)", { variant: "secondary", attrs: 'data-action="toast" data-msg="Would export your gallery"' }) + "</div>");
   };
 
@@ -224,7 +257,14 @@
       rowToggle("Breakfast", r.bTime, r.breakfast, "prefs.reminders.breakfast") +
       rowToggle("Lunch", r.lTime, r.lunch, "prefs.reminders.lunch") +
       rowToggle("Dinner", r.dTime, r.dinner, "prefs.reminders.dinner") + "</div>" +
-      '<div class="mt16">' + E.btn("Save reminder", { attrs: 'data-action="toast" data-msg="Reminder scheduled (demo)"' }) + "</div>");
+      '<div class="overline mt16">Custom reminder</div>' +
+      '<div class="mt8">' + E.field({ label: "Title", id: "crt", model: "custom-title", value: E.state.ui.customTitle, placeholder: "Log a snack" }) + "</div>" +
+      '<div class="mt8">' + E.chips(["11:00", "15:00", "16:30"], E.state.ui.customTime || "15:00", "custom-time") + "</div>" +
+      '<div class="mt12">' + E.btn("Add custom reminder", { attrs: 'data-action="add-reminder"' }) + "</div>" +
+      (r.custom || []).map(function (c) {
+        return '<div class="between card mt12"><div><b>' + E.esc(c.title) + '</b><div class="caption">' + E.esc(c.time) + " · " + (c.on ? "On" : "Off") + "</div></div>" +
+          E.btn(c.on ? "Turn off" : "Turn on", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="toggle-reminder" data-id="' + c.id + '"' }) + "</div>";
+      }).join(""));
   };
 
   E.screens.saved = function () {
@@ -392,6 +432,8 @@
       ["sam", "Sam · unverified"],
       ["aisha", "Aisha · chat setup"],
       ["teen", "Aarav · under 18"],
+      ["kid", "Aman · under 16"],
+      ["sunita", "Sunita · breastfeeding"],
       ["fresh", "Onboarding incomplete"]
     ];
     const jumps = [["paywall", "Paywall", "open-paywall"], ["scan", "Scan", "open-scan"], ["delete-account", "Delete account", "go"]];
@@ -405,6 +447,7 @@
       rowToggle("Camera denied", "Permission screen on Photo", E.state.flags.cameraDenied, "flags.cameraDenied") +
       rowToggle("List loading", "Skeleton lists", E.state.flags.forceLoading, "flags.forceLoading") +
       rowToggle("List error", "Error empty states", E.state.flags.forceError, "flags.forceError") +
+      rowToggle("Slow network", "Photo scan times out, then retry", E.state.flags.slowNet, "flags.slowNet") +
       "</div>" +
       '<div class="grid2 mt12">' +
       E.btn("Error toast", { size: "sm", variant: "secondary", attrs: 'data-action="toast" data-kind="err" data-msg="Couldn\'t save — check connection"' }) +

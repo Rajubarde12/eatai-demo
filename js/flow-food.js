@@ -16,13 +16,15 @@
       let inner = String(d.getDate());
       if (future) cls += " future";
       else if (today) {
-        const over = E.dayTotals(iso).kcal > E.state.user.plan.kcal;
-        cls += over ? " warn today" : " done today";
-        if (!over && E.dayMeals(iso).length && E.dayTotals(iso).kcal >= E.state.user.plan.kcal * 0.9) inner = "✓";
+        const logged = E.dayMeals(iso).length > 0;
+        const over = logged && E.dayTotals(iso).kcal > E.state.user.plan.kcal;
+        if (logged && over) cls += " warn today";
+        else if (logged) cls += " done today";
+        else cls += " today";
+        if (logged && !over && E.dayTotals(iso).kcal >= E.state.user.plan.kcal * 0.9) inner = "✓";
       } else if (status === "done") { cls += " done"; inner = "✓"; }
       else if (status === "warning") cls += " warn";
       else if (status === "missed") cls += " miss";
-      else cls += " miss";
       const letter = d.toLocaleDateString("en-IN", { weekday: "narrow" });
       html += '<button type="button" data-action="open-day" data-iso="' + iso + '"><span class="dow">' + letter + '</span><span class="' + cls + '">' + inner + "</span></button>";
     }
@@ -171,8 +173,9 @@
     const lock = locked ? '<button type="button" class="lock-banner" data-action="open-paywall"><span class="ico-sq">' + E.icon("lock") + '</span><span class="grow"><b>AI scanning is a Pro feature</b><div class="caption" style="color:rgba(255,255,255,.7)">You\'ve used the free scans in this demo.</div></span><span class="label" style="color:var(--lime)">Unlock</span></button>' : "";
     const controls = mode === "describe" ? "" : '<div class="between mt20" style="padding:0 28px 8px"><button type="button" class="icon-btn on-photo" data-action="open-gallery" aria-label="Gallery">' + E.icon("image") + '</button>' +
       '<button type="button" class="shutter" data-action="shutter" aria-label="Shutter"><span class="core"></span></button><span style="width:44px"></span></div>';
-    const analyzing = ui.analyzing ? '<div class="analyze"><div class="spinner" style="width:28px;height:28px;border-width:3px"></div><div class="heading mt16" id="analyze-tip">Identifying every item…</div><p class="caption mt8" style="color:rgba(255,255,255,.7)">Estimates, not a lab result. You can edit them next.</p></div>' : "";
-    const body = lock + stage + controls + analyzing +
+    const analyzing = ui.analyzing ? '<div class="analyze"><div class="spinner" style="width:28px;height:28px;border-width:3px"></div><div class="heading mt16" id="analyze-tip">' + E.esc(ui.scanProgress || "Compressing photo…") + '</div><p class="caption mt8" style="color:rgba(255,255,255,.7)">Estimates, not a lab result. You can edit them next.</p></div>' : "";
+    const scanErr = ui.scanError ? '<button type="button" class="lock-banner" data-action="retry-scan"><span class="grow"><b>' + E.esc(ui.scanError) + '</b><div class="caption" style="color:rgba(255,255,255,.7)">Tap to retry</div></span></button>' : "";
+    const body = lock + scanErr + (ui.analyzing && mode === "photo" ? "" : stage) + (ui.analyzing ? "" : controls) + analyzing +
       '<div class="seg dark" style="margin:16px 8px 0">' +
       ["photo", "barcode", "describe"].map(function (id) {
         const label = id === "photo" ? "Photo" : id === "barcode" ? "Barcode" : "Describe";
@@ -189,9 +192,11 @@
     const after = plan.kcal - E.dayTotals(E.todayIso()).kcal - totals.kcal;
     const source = scan.source === "barcode" ? "Barcode match" : scan.source === "describe" ? "From your description" : "AI detected";
     const items = scan.items.map(function (it, idx) {
-      return '<div class="line"><div class="grow"><div class="heading" style="font-size:15px">' + E.esc(it.name) + '</div><div class="caption">' + E.esc(it.serving) + " · " + E.num(it.kcal * (it.qty || 1)) + ' kcal</div></div>' +
+      return '<div class="card mt8"><input class="plain-area" style="min-height:0;padding:8px 10px;font-weight:700" data-model="item-name" data-idx="' + idx + '" value="' + E.esc(it.name) + '" aria-label="Item name">' +
+        '<div class="caption mt8" data-scan-macros="' + idx + '">' + E.esc(it.serving) + " · P " + it.p + " · C " + it.c + " · F " + it.f + "</div>" +
+        '<div class="between mt8"><label class="caption">kcal <input inputmode="numeric" style="width:72px;margin-left:6px;border:0;background:var(--canvas);border-radius:8px;padding:6px 8px;font-weight:700" data-model="item-kcal" data-idx="' + idx + '" value="' + it.kcal + '" aria-label="Item calories"></label>' +
         '<div class="qty"><button type="button" data-action="scan-qty" data-dir="-1" data-idx="' + idx + '" aria-label="Less">−</button><span class="nums label">' + it.qty + '</span><button type="button" data-action="scan-qty" data-dir="1" data-idx="' + idx + '" aria-label="More">+</button></div>' +
-        '<button type="button" class="icon-btn flat" data-action="scan-remove" data-idx="' + idx + '" aria-label="Remove">' + E.icon("trash-2") + "</button></div>";
+        '<button type="button" class="icon-btn flat" data-action="scan-remove" data-idx="' + idx + '" aria-label="Remove">' + E.icon("trash-2") + "</button></div></div>";
     }).join("");
     const pills = E.mealTypes.map(function (mt) {
       return '<button type="button" class="chip ' + (scan.mealType === mt.id ? "on" : "") + '" data-action="scan-type" data-value="' + mt.id + '">' + mt.emoji + " " + mt.label + "</button>";
@@ -202,9 +207,9 @@
       '<div class="mt12">' + E.field({ label: "Meal name", id: "scan-name", model: "scan-name", value: scan.name }) + "</div>" +
       '<div class="hscroll mt12">' + pills + "</div>" +
       '<div class="mt8">' + items + "</div>" +
-      '<div class="hero-card mt16"><div class="kcal-num nums">' + E.num(totals.kcal) + '</div><div class="caption" style="color:rgba(255,255,255,.7)">kcal in this meal · estimates</div>' +
-      '<div class="caption mt8" style="color:rgba(255,255,255,.85)">' + (after >= 0 ? "After this meal you'll have " + E.num(after) + " kcal left." : "After this meal you'll be " + E.num(Math.abs(after)) + " kcal over today. That's allowed.") + "</div>" +
-      '<div class="mt12">' + E.macros({ p: totals.p, c: totals.c, f: totals.f }, { p: Math.max(totals.p, 1), c: Math.max(totals.c, 1), f: Math.max(totals.f, 1) }) + "</div></div>" +
+      '<div class="hero-card mt16"><div class="kcal-num nums" id="scan-meal-kcal">' + E.num(totals.kcal) + '</div><div class="caption" style="color:rgba(255,255,255,.7)">kcal in this meal · estimates</div>' +
+      '<div class="caption mt8" id="scan-meal-after" style="color:rgba(255,255,255,.85)">' + (after >= 0 ? "After this meal you'll have " + E.num(after) + " kcal left." : "After this meal you'll be " + E.num(Math.abs(after)) + " kcal over today. That's allowed.") + "</div>" +
+      '<div class="mt12" id="scan-meal-macros">' + E.macros({ p: totals.p, c: totals.c, f: totals.f }, { p: Math.max(totals.p, 1), c: Math.max(totals.c, 1), f: Math.max(totals.f, 1) }) + "</div></div>" +
       '<div class="card mt12 between"><div><div class="heading" style="font-size:15px">Save for quick add later</div><div class="caption">Shows in Eat it again</div></div>' +
       E.switch(!!scan.saveLater, 'data-action="scan-save-toggle"') + "</div>" +
       '<div class="mt16">' + E.btn("Add to diary", { attrs: 'data-action="add-diary"' }) + "</div>" +

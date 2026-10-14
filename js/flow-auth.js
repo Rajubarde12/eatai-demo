@@ -83,7 +83,8 @@
     }).join("");
     const body = '<div class="overline">Check your inbox</div>' +
       '<h1 class="title mt8">Enter the 6-digit code</h1>' +
-      '<p class="body muted mt8">We sent it to <b>' + E.esc(u.email) + "</b>. This demo accepts <b>123456</b>.</p>" +
+      '<p class="body muted mt8">We sent it to <b>' + E.esc(u.email) + "</b>. This demo accepts <b>123456</b>. The code expires in about a minute.</p>" +
+      (ui.otpExpiresAt && Date.now() > ui.otpExpiresAt ? '<p class="field-error mt12">This code has expired. Resend a new one before you try 123456 again.</p>' : "") +
       '<div class="otp mt20">' + boxes + "</div>" +
       (ui.authError ? '<p class="field-error mt12">' + E.esc(ui.authError) + "</p>" : "") +
       '<div class="mt20">' + E.btn("Verify email", { busy: ui.busy === "verify", attrs: 'data-action="verify"' }) + "</div>" +
@@ -142,8 +143,16 @@
         E.field({ id: "ob-name", model: "ob-name", placeholder: "Priya", value: ob.name }) + "</div>";
     }
     if (step === "gender") {
+      const preg = ob.gender === "female" ? '<div class="card mt16"><div class="heading">Pregnant or breastfeeding?</div><p class="caption mt8">Optional. We skip deficit targets and keep calories supportive.</p><div class="hscroll mt12">' +
+        [["pregnant", "Pregnant"], ["breastfeeding", "Breastfeeding"], ["", "Neither"]].map(function (p) {
+          const on = (ob.pregnancy || "") === p[0];
+          return '<button type="button" class="chip ' + (on ? "on" : "") + '" data-action="ob-preg" data-value="' + p[0] + '">' + p[1] + "</button>";
+        }).join("") + "</div>" +
+        (ob.pregnancy === "pregnant" ? '<p class="caption mt12">During pregnancy we skip target-weight dieting and keep the plan on supportive maintenance calories.</p>' : "") +
+        (ob.pregnancy === "breastfeeding" ? '<p class="caption mt12">While breastfeeding we keep maintenance calories, plus about 300 kcal for milk production.</p>' : "") +
+        "</div>" : "";
       return '<div class="title">Which best describes you?</div><p class="caption mt8">Only to estimate calories. Not shown publicly.</p><div class="mt16">' +
-        genders.map(function (g) { return E.tile({ emoji: g.emoji, title: g.title, sub: g.sub, value: g.id, on: ob.gender === g.id, action: "ob-pick" }); }).join("") + "</div>";
+        genders.map(function (g) { return E.tile({ emoji: g.emoji, title: g.title, sub: g.sub, value: g.id, on: ob.gender === g.id, action: "ob-pick" }); }).join("") + "</div>" + preg;
     }
     if (step === "birth") {
       const m = ob.month;
@@ -190,6 +199,18 @@
       ];
       return '<div class="title">How fast do you want to ' + word + '?</div><p class="caption mt8">Slower is easier to keep. You can edit this anytime.</p><div class="mt16">' +
         paces.map(function (p) { return E.tile({ emoji: p.emoji, title: p.title, sub: p.sub, value: p.id, on: ob.pace === p.id, action: "ob-pick" }); }).join("") + "</div>";
+    }
+    if (step === "support") {
+      const mode = E.protectedMode(ob);
+      const copy = mode === "kid"
+        ? { label: "Protected mode", value: "No dieting target", caption: "Because this profile is under 16, we skip dieting targets and focus on supportive calories and balanced macros." }
+        : mode === "pregnant"
+          ? { label: "Supportive mode", value: "No dieting target", caption: "Target weight and pace are skipped so the plan stays safe during pregnancy. You can still finish onboarding normally." }
+          : mode === "breastfeeding"
+            ? { label: "Supportive mode", value: "No dieting target", caption: "Target weight and pace are skipped. The plan adds about 300 kcal on top of maintenance for milk production." }
+            : { label: "Maintenance", value: "Stay at current weight", caption: "Daily calories stay around maintenance so you can focus on consistency and food quality." };
+      const extra = mode === "breastfeeding" ? '<div class="card mt12"><p class="caption">You will see the extra energy on the plan screen. This is a starting estimate, not medical advice.</p></div>' : "";
+      return '<div class="title">' + copy.value + '</div><p class="caption mt8">' + copy.label + '</p><div class="card mt16"><div class="heading">' + copy.value + '</div><p class="body muted mt8">' + copy.caption + "</p></div>" + extra;
     }
     if (step === "activity") {
       return '<div class="title">How active is a normal day?</div><p class="caption mt8">Not workouts — just how your day feels.</p><div class="mt16">' +

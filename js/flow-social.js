@@ -1,18 +1,17 @@
 (function () {
   const E = window.EatAI;
 
-  function setupSteps() {
-    const u = E.state.user;
-    const ui = E.state.ui;
-    return [
-      { ok: String(u.name || "").trim().length >= 2, title: "Your name", sub: u.name || "Add the name people should see" },
-      { ok: !!u.photoSet, title: "A photo or colour", sub: u.photoSet ? "Photo added for this demo" : "Tap to add a stand-in photo" },
-      { ok: String(u.bio || "").trim().length >= 10, title: "A short bio", sub: "What you're working toward" },
-      { ok: !u.ageBlocked && E.age(u.birthYear, u.birthMonth) >= 18, title: "Confirm you're 18+", sub: "Discovery and chat are for adults" },
-      { ok: (u.training || []).length >= 1, title: "How you train", sub: "Pick at least one tag" },
-      { ok: String(u.city || "").trim().length >= 2, title: "Your city", sub: u.city || "Search a city" }
-    ];
-  }
+  E.pendingChatFields = function (u) {
+    const fields = [];
+    if (String(u.name || "").trim().length < 2) fields.push("name");
+    if (!u.photoSet) fields.push("photo");
+    if (!(u.birthYear && E.age(u.birthYear, u.birthMonth) >= 18)) fields.push("birth");
+    if (!(u.training || []).length) fields.push("tags");
+    if (E.age(u.birthYear, u.birthMonth) >= 18 && !u.discovery) fields.push("discovery");
+    if (String(u.city || "").trim().length < 2) fields.push("city");
+    if (String(u.bio || "").trim().length < 10 && !u.bioSkipped) fields.push("bio");
+    return fields;
+  };
 
   E.screens.messages = function () {
     const u = E.state.user;
@@ -77,22 +76,39 @@
 
   function chatSetup() {
     const u = E.state.user;
-    const steps = setupSteps();
-    const done = steps.filter(function (s) { return s.ok; }).length;
+    const fields = E.pendingChatFields(u);
+    if (!fields.length) {
+      u.chatReady = true;
+      return E.screens.messages();
+    }
+    const i = Math.min(E.state.ui.chatStep || 0, fields.length - 1);
+    const field = fields[i];
+    const copy = {
+      name: ["What should we call you?", "This name shows when people message you.", "Save name"],
+      photo: ["Add a profile photo", "A clear photo builds trust. This demo uses a stand-in colour photo.", "Save photo"],
+      birth: ["Confirm your age", "Discovery and Chat stay locked until you're 18.", "Save birthday"],
+      tags: ["How do you train?", "Pick 1–3 tags so we can match you with the right people.", "Save tags"],
+      discovery: ["Turn on Discover", "Chat unlocks with Discover so nearby accountability partners can find you — never a dating feed.", "Enable Discover"],
+      city: ["Add your city", "We use your city to show people nearby.", "Save city"],
+      bio: ["Write a short bio", "One line about how you train or eat — or skip for now.", "Save bio"]
+    }[field];
     const trains = ["Gym", "Running", "Yoga", "Cycling", "Walking", "HIIT"];
     const cities = E.cities.filter(function (c) { return c.toLowerCase().indexOf((E.state.ui.cityQuery || u.city || "").toLowerCase()) >= 0; }).slice(0, 5);
-    const body = '<div class="overline">Before you message</div><div class="title mt8">Set up chat</div>' +
-      '<p class="body muted mt8">Accountability partners, not dating. ' + done + " of " + steps.length + " ready.</p>" +
-      '<div class="track light mt12"><span style="width:' + Math.round(done / steps.length * 100) + '%;background:var(--ink)"></span></div>' +
-      '<div class="stack mt16">' + steps.map(function (s) {
-        return '<div class="card" style="padding:12px 14px"><div class="between"><div class="heading" style="font-size:15px">' + s.title + '</div><span>' + (s.ok ? "✅" : "○") + '</span></div><div class="caption">' + E.esc(s.sub) + "</div></div>";
-      }).join("") + "</div>" +
-      '<div class="mt16">' + E.btn(u.photoSet ? "Photo added" : "Add a demo photo", { variant: "secondary", attrs: 'data-action="demo-photo"' }) + "</div>" +
-      '<div class="mt12">' + E.field({ label: "Bio", id: "bio", model: "bio", value: u.bio, placeholder: "Training for a 10K. Home lunches." }) + "</div>" +
-      '<div class="mt12"><div class="field-label">Training tags</div><div class="mt8">' + E.chips(trains, u.training || [], "social-tag") + "</div></div>" +
-      '<div class="mt12">' + E.field({ label: "City", id: "city-q", model: "city-q", value: E.state.ui.cityQuery || u.city, placeholder: "Bengaluru" }) +
-      '<div class="hscroll mt8">' + cities.map(function (c) { return '<button type="button" class="chip ' + (u.city === c ? "on" : "") + '" data-action="pick-city" data-value="' + E.esc(c) + '">' + E.esc(c) + "</button>"; }).join("") + "</div></div>" +
-      '<div class="mt20">' + E.btn("Open messages", { disabled: done < steps.length, attrs: 'data-action="finish-chat"' }) + "</div>";
+    let form = "";
+    if (field === "name") form = E.field({ id: "chat-name", model: "edit-name", value: E.state.ui.editName || u.name, placeholder: "Priya" });
+    if (field === "photo") form = E.btn(u.photoSet ? "Photo added" : "Add a demo photo", { variant: "secondary", attrs: 'data-action="demo-photo"' });
+    if (field === "birth") form = '<div class="card"><div class="heading">' + E.months[u.birthMonth || 0] + " " + u.birthYear + '</div><p class="caption mt8">You are ' + E.age(u.birthYear, u.birthMonth) + ". Chat opens at 18.</p></div>";
+    if (field === "tags") form = E.chips(trains, u.training || [], "social-tag");
+    if (field === "discovery") form = '<div class="card between"><div><div class="heading">Discover</div><div class="caption">Show you to people with a similar goal</div></div>' + E.switch(!!u.discovery, 'data-action="toggle" data-path="user.discovery"') + "</div>";
+    if (field === "city") form = E.field({ id: "city-q", model: "city-q", value: E.state.ui.cityQuery || u.city, placeholder: "Bengaluru" }) +
+      '<div class="hscroll mt8">' + cities.map(function (c) { return '<button type="button" class="chip ' + (u.city === c ? "on" : "") + '" data-action="pick-city" data-value="' + E.esc(c) + '">' + E.esc(c) + "</button>"; }).join("") + "</div>";
+    if (field === "bio") form = E.field({ id: "bio", model: "bio", value: u.bio, placeholder: "Training for a 10K. Home lunches." });
+    const skip = field === "bio" ? '<div class="mt8">' + E.btn("Skip for now", { variant: "ghost", attrs: 'data-action="chat-skip-bio"' }) + "</div>" : "";
+    const body = '<div class="overline">Step ' + (i + 1) + " of " + fields.length + '</div><div class="title mt8">' + copy[0] + "</div>" +
+      '<p class="body muted mt8">' + copy[1] + "</p>" +
+      '<div class="track light mt12"><span style="width:' + Math.round(((i + 1) / fields.length) * 100) + '%;background:var(--ink)"></span></div>' +
+      '<div class="mt16">' + form + "</div>" + skip +
+      '<div class="mt20">' + E.btn(copy[2], { attrs: 'data-action="chat-next"' }) + "</div>";
     return E.page({ tab: true, body: body });
   }
 
@@ -155,7 +171,8 @@
     const p = (E.state.discover || []).find(function (d) { return d.id === (E.currentParams() || {}).id; });
     if (!p) return E.page({ top: E.topTitle("Profile"), body: E.empty({ emoji: "👤", title: "Profile unavailable" }) });
     return E.page({
-      top: E.topTitle("Profile"),
+      top: E.backBtn() + '<div class="top-title"><div class="heading">' + E.esc(p.name) + "</div></div>" +
+        E.iconBtn("ellipsis", 'data-action="profile-more" data-id="' + p.id + '" aria-label="Report or block"', "flat"),
       body: '<div class="center">' + E.avatar({ name: p.name, color: p.color, size: 84 }) + '<div class="title mt12">' + E.esc(p.name) + '</div><div class="caption">' + E.esc(p.goal) + " · " + E.esc(p.distance) + "</div></div>" +
         '<p class="body mt16">' + E.esc(p.bio) + "</p>" +
         '<div class="hscroll mt12">' + p.tags.map(function (t) { return '<span class="chip">' + E.esc(t) + "</span>"; }).join("") + "</div>" +
@@ -167,17 +184,20 @@
   E.screens.communities = function () {
     const tab = E.state.ui.communityTab || "mine";
     const q = (E.state.ui.communityQuery || "").toLowerCase();
-    let list = (E.state.communities[tab] || []).slice();
+    const city = (E.state.user.city || "").toLowerCase();
+    let list = (E.state.communities[tab] || []).filter(function (c) { return !c.archived && (tab === "mine" ? c.joined !== false : !c.joined); });
     if (tab === "discover" && q) list = list.filter(function (c) { return (c.name + " " + c.city).toLowerCase().indexOf(q) >= 0; });
+    if (tab === "discover" && E.state.ui.nearMe) list = list.filter(function (c) { return city && c.city.toLowerCase() === city; });
     const gate = E.gate();
     const cards = list.map(function (c) {
       return '<button type="button" class="card mt12" style="width:100%;text-align:left;border:0;color:inherit" data-action="open-community" data-id="' + c.id + '" data-list="' + tab + '">' +
         '<div class="photo" style="height:92px;border-radius:16px;background:hsl(' + c.hue + ',45%,78%)"><span style="font-size:32px">🌍</span></div>' +
-        '<div class="heading mt12" style="font-size:16px">' + E.esc(c.name) + '</div><div class="caption">' + c.members + " members · " + E.esc(c.city) + "</div></button>";
+        '<div class="heading mt12" style="font-size:16px">' + E.esc(c.name) + '</div><div class="caption">' + c.members + " members · " + E.esc(c.city) + (c.joined ? "" : " · Join to post") + "</div></button>";
     }).join("");
+    const near = tab === "discover" ? '<div class="mt12"><button type="button" class="chip ' + (E.state.ui.nearMe ? "on" : "") + '" data-action="toggle-near">Near me</button></div>' : "";
     const body = '<div class="mt4">' + E.segmented([{ id: "mine", label: "Mine" }, { id: "discover", label: "Discover" }], tab, "comm-tab") + "</div>" +
-      (tab === "discover" ? '<div class="mt12">' + E.field({ id: "cq", model: "comm-q", placeholder: "Search by name or city", value: E.state.ui.communityQuery, icon: "search" }) + "</div>" : "") +
-      (gate || cards || E.empty({ emoji: "🌍", title: "No communities yet", sub: "Discover a group, or create one on Pro." }));
+      (tab === "discover" ? '<div class="mt12">' + E.field({ id: "cq", model: "comm-q", placeholder: "Search by name or city", value: E.state.ui.communityQuery, icon: "search" }) + "</div>" + near : "") +
+      (gate || cards || E.empty({ emoji: "🌍", title: E.state.ui.nearMe ? "Nothing in your city yet" : "No communities yet", sub: "Discover a group, or create one on Pro." }));
     return E.page({
       top: E.backBtn() + '<div class="top-title"><div class="heading">Communities</div></div>' + E.iconBtn("plus", 'data-action="create-community-gate" aria-label="Create community"', "ink"),
       body: body
@@ -186,33 +206,60 @@
 
   E.screens.community = function () {
     const p = E.currentParams() || {};
-    const list = (E.state.communities[p.list || "mine"] || []).concat(E.state.communities.mine, E.state.communities.discover);
-    const c = list.find(function (x) { return x.id === p.id; });
-    if (!c) return E.page({ top: E.topTitle("Community"), body: E.empty({ emoji: "🌍", title: "Community not found" }) });
+    const c = E.communityById(p.id);
+    if (!c || c.archived) return E.page({ top: E.topTitle("Community"), body: E.empty({ emoji: "🌍", title: "Community not found" }) });
+    const view = E.state.ui.commView || "feed";
+    const joined = !!c.joined;
     const posts = (c.posts || []).map(function (post) {
-      return '<div class="card mt12"><div class="heading" style="font-size:15px">' + E.esc(post.author) + '</div><p class="body mt8">' + E.esc(post.text) + '</p><div class="caption mt8">' + E.esc(post.time) + "</div></div>";
-    }).join("") || '<div class="card mt12"><b>Demo post</b><p class="caption mt8">Members share plates and training notes. This feed is local to the demo.</p></div>';
-    const top = E.backBtn() + '<div class="top-title"><div class="heading">' + E.esc(c.name) + "</div></div>" +
+      const open = E.state.ui.openPost === post.id;
+      const replies = (post.replies || []).map(function (r) {
+        return '<div class="card mt8" style="padding:10px 12px"><b>' + E.esc(r.author) + '</b><div class="caption mt4">' + E.esc(r.text) + "</div></div>";
+      }).join("");
+      return '<div class="card mt12"><div class="heading" style="font-size:15px">' + E.esc(post.author) + '</div><p class="body mt8">' + E.esc(post.text) + '</p>' +
+        '<div class="row gap12 mt8"><button type="button" class="chip ' + (post.liked ? "on" : "") + '" data-action="like-post" data-id="' + post.id + '" data-cid="' + c.id + '">♥ ' + (post.likes || 0) + '</button>' +
+        '<button type="button" class="chip" data-action="toggle-replies" data-id="' + post.id + '">💬 ' + ((post.replies || []).length) + " replies</button></div>" +
+        (open ? replies + (joined ? '<div class="mt8">' + E.field({ id: "reply", model: "reply-draft", value: E.state.ui.replyDraft, placeholder: "Write a reply" }) + "</div>" +
+          '<div class="mt8">' + E.btn("Reply", { size: "sm", attrs: 'data-action="send-reply" data-id="' + post.id + '" data-cid="' + c.id + '"' }) + "</div>" : "") : "") +
+        "</div>";
+    }).join("") || E.empty({ emoji: "✨", title: "No posts yet", sub: joined ? "Say hello — share a win or a question." : "Join to see and write posts." });
+    const members = (c.pending || []).map(function (m) {
+      return '<div class="between card mt12"><span class="grow"><b>' + E.esc(m.name) + '</b><div class="caption">Join request</div></span>' +
+        (c.admin ? E.btn("Approve", { size: "sm", block: false, attrs: 'data-action="approve-member" data-id="' + m.id + '" data-cid="' + c.id + '"' }) +
+          E.btn("Reject", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="reject-member" data-id="' + m.id + '" data-cid="' + c.id + '"' }) : "") + "</div>";
+    }).join("") + (c.memberList || []).map(function (m) {
+      return '<div class="between card mt12"><span class="grow"><b>' + E.esc(m.name) + '</b><div class="caption">' + E.esc(m.role || "member") + "</div></span>" +
+        (c.admin && m.id !== "me" ? E.btn("Remove", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="remove-member" data-id="' + m.id + '" data-cid="' + c.id + '"' }) : "") + "</div>";
+    }).join("") || E.empty({ emoji: "👥", title: "No members yet" });
+    const about = '<div class="card mt12"><b>About</b><p class="body muted mt8">' + E.esc(c.description || "No description yet.") + '</p><p class="caption mt8">' + E.esc(c.city || "") + "</p></div>" +
+      '<div class="card mt12"><b>Rules</b><p class="body muted mt8">' + E.esc(c.rules || "Be kind.") + "</p></div>";
+    const pane = view === "members" ? members : view === "about" ? about : posts;
+    const composer = view === "feed" && joined ? '<div class="mt16">' + E.field({ id: "post", model: "post-draft", value: E.state.ui.postDraft, placeholder: "Share with the group" }) +
+      '<div class="mt8">' + E.btn("Post", { attrs: 'data-action="community-post" data-cid="' + c.id + '"' }) + "</div></div>" : "";
+    const join = joined
+      ? E.btn("Leave", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="leave-community" data-cid="' + c.id + '"' })
+      : E.btn("Join", { size: "sm", block: false, attrs: 'data-action="join-community" data-cid="' + c.id + '"' });
+    const top = E.backBtn() + '<div class="top-title"><div class="heading">' + E.esc(c.name) + '</div><div class="caption">' + c.members + " members</div></div>" +
       (c.admin ? E.iconBtn("settings", 'data-action="go" data-screen="community-settings" data-id="' + c.id + '"', "flat") : "");
     return E.page({
       top: top,
-      body: '<div class="photo" style="height:120px;border-radius:20px;background:hsl(' + c.hue + ',40%,80%)"><span style="font-size:40px">🌍</span></div>' +
-        '<div class="caption mt12">' + c.members + " members · " + E.esc(c.city) + "</div><p class=\"body mt8\">" + E.esc(c.description || "") + "</p>" +
-        '<div class="overline mt16">Feed</div>' + posts
+      body: '<div class="between mt4"><span class="caption">' + E.esc(c.city || "") + "</span>" + join + "</div>" +
+        '<div class="mt12">' + E.segmented([{ id: "feed", label: "Feed" }, { id: "members", label: "Members" }, { id: "about", label: "About" }], view, "comm-view") + "</div>" +
+        pane + composer
     });
   };
 
   E.screens["community-settings"] = function () {
     const id = (E.currentParams() || {}).id;
-    const c = (E.state.communities.mine || []).find(function (x) { return x.id === id; }) || E.state.communities.mine[0];
+    const c = E.communityById(id);
     if (!c) return E.page({ top: E.topTitle("Community"), body: "" });
     return E.page({
-      top: E.topTitle("Community settings", "Only admins see this"),
+      top: E.topTitle("Community settings", "Edit details or archive"),
       body: E.field({ label: "Name", id: "cn", model: "comm-name", value: E.state.ui.commName || c.name }) +
-        '<div class="mt12">' + E.field({ label: "City", id: "cc", model: "comm-city", value: E.state.ui.commCity || c.city }) + "</div>" +
-        '<div class="mt12"><div class="field-label">Visibility</div><div class="mt8">' + E.segmented([{ id: "public", label: "Public" }, { id: "private", label: "Private" }], c.visibility || "public", "comm-vis") + "</div></div>" +
-        '<div class="mt12"><div class="field-label">Rules</div><textarea class="plain-area mt8" data-model="comm-rules">' + E.esc(c.rules || "") + "</textarea></div>" +
-        '<div class="mt16">' + E.btn("Save settings", { attrs: 'data-action="save-community"' }) + "</div>"
+        '<div class="mt12">' + E.field({ label: "Description", id: "cd", model: "comm-about", value: E.state.ui.commAbout || c.description }) + "</div>" +
+        '<div class="mt12"><div class="field-label">Rules</div><textarea class="plain-area mt8" data-model="comm-rules">' + E.esc(E.state.ui.commRules != null ? E.state.ui.commRules : (c.rules || "")) + "</textarea></div>" +
+        '<div class="mt16">' + E.btn("Save changes", { attrs: 'data-action="save-community" data-id="' + c.id + '"' }) + "</div>" +
+        '<div class="mt8">' + E.btn("Archive community", { variant: "danger", attrs: 'data-action="ask-archive" data-id="' + c.id + '"' }) + "</div>" +
+        '<p class="caption mt12">Archiving removes the group from Mine. Members lose access in this demo.</p>'
     });
   };
 
