@@ -121,6 +121,11 @@
         }
       }
     }
+    if (E.state.ui && E.state.ui.focusComposer) {
+      E.state.ui.focusComposer = false;
+      const box = document.getElementById("composer");
+      if (box) box.focus();
+    }
     mount(screen);
     if (anim && window.gsap) {
       window.gsap.from("#stage .rise", { y: 12, opacity: 0, duration: 0.4, stagger: 0.04, ease: "power2.out" });
@@ -205,37 +210,18 @@
     if (!window.Chart) return;
     const cal = document.getElementById("cal-chart");
     if (cal) {
-      const week = E.state.ui.progressWeek || 0;
-      const now = new Date();
-      const monday = (now.getDay() === 0 ? -6 : 1 - now.getDay()) + week * 7;
-      const labels = []; const data = []; const goal = [];
-      let sum = 0; let psum = 0; let on = 0; let counted = 0;
-      for (let i = 0; i < 7; i++) {
-        const d = E.addDays(monday + i);
-        const iso = E.iso(d);
-        labels.push(d.toLocaleDateString("en-IN", { weekday: "narrow" }));
-        const totals = E.dayTotals(iso);
-        data.push(totals.kcal);
-        goal.push(E.state.user.plan.kcal);
-        if (iso <= E.todayIso()) {
-          counted++; sum += totals.kcal; psum += totals.p;
-          if (totals.kcal > 0 && totals.kcal <= E.state.user.plan.kcal * 1.05) on++;
-        }
-      }
-      const label = document.getElementById("week-label");
-      if (label) label.textContent = E.shortDate(E.iso(E.addDays(monday))) + " – " + E.shortDate(E.iso(E.addDays(monday + 6)));
-      const ak = document.getElementById("avg-kcal");
-      const ap = document.getElementById("avg-p");
-      const ot = document.getElementById("on-target");
-      if (ak) ak.textContent = E.num(counted ? sum / counted : 0);
-      if (ap) ap.textContent = Math.round(counted ? psum / counted : 0) + "g";
-      if (ot) ot.textContent = on + "/" + counted;
+      const days = E.weekDays(E.state.ui.progressWeek || 0);
+      const goal = E.state.user.plan.kcal;
       if (E._cal) E._cal.destroy();
       E._cal = new window.Chart(cal, {
         type: "bar",
-        data: { labels: labels, datasets: [
-          { type: "bar", data: data, backgroundColor: "#121210", borderRadius: 8, barThickness: 14 },
-          { type: "line", data: goal, borderColor: "#C6F135", borderWidth: 2, pointRadius: 0, borderDash: [4, 4] }
+        data: { labels: days.map(function (d) { return d.label; }), datasets: [
+          { type: "bar", data: days.map(function (d) { return d.totals.kcal; }), backgroundColor: days.map(function (d) {
+            if (d.status === "warning") return "#E08A2C";
+            if (d.logged) return d.iso === E.todayIso() ? "#121210" : "rgba(18,18,16,.72)";
+            return "#ECE9E1";
+          }), borderRadius: 8, barThickness: 14 },
+          { type: "line", data: days.map(function () { return goal; }), borderColor: "#C6F135", borderWidth: 2, pointRadius: 0, borderDash: [4, 4] }
         ] },
         options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { display: false } } }
       });
@@ -248,9 +234,16 @@
       const logs = (E.state.weightLog || []).filter(function (w) { return range === "All" || w.date >= from; });
       if (E._wt) E._wt.destroy();
       if (!logs.length) return;
+      const trendLine = logs.map(function (l, i) {
+        const slice = logs.slice(Math.max(0, i - 6), i + 1);
+        return slice.reduce(function (s, x) { return s + Number(x.kg); }, 0) / slice.length;
+      });
       E._wt = new window.Chart(wt, {
         type: "line",
-        data: { labels: logs.map(function (l) { return l.date.slice(5); }), datasets: [{ data: logs.map(function (l) { return l.kg; }), borderColor: "#121210", backgroundColor: "rgba(198,241,53,.45)", fill: true, tension: 0.35, pointRadius: 3, pointBackgroundColor: "#C6F135" }] },
+        data: { labels: logs.map(function (l) { return l.date.slice(5); }), datasets: [
+          { data: logs.map(function (l) { return l.kg; }), showLine: false, pointRadius: 3, pointBackgroundColor: "#121210" },
+          { data: trendLine, borderColor: "#8FB516", backgroundColor: "rgba(198,241,53,.35)", fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 }
+        ] },
         options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 5 } }, y: { ticks: { font: { size: 10 } } } } }
       });
     }
@@ -318,15 +311,23 @@
     const scanKind = kind === "shutter" || kind === "describe" || kind === "barcode";
     if (scanKind && lockedScan()) return;
     if (!scanKind && !E.isPro()) return;
-    if ((kind === "shutter" || kind === "describe") && !E.state.user.ai) {
+    if ((kind === "shutter" || kind === "describe" || kind === "chat-meal-type") && !E.state.user.ai) {
       openModal("ai-consent");
       return;
     }
     E.state.ui.pendingGate = null;
-    if (kind === "shutter" || kind === "barcode") actions.shutter();
+    if (kind === "barcode") actions.shutter();
+    else if (kind === "shutter") beginPhotoHold(E.state.ui.photoKind || "camera");
     else if (kind === "describe") actions["describe-submit"]();
-    else if (kind === "share") actions["share-meal"]({ dataset: { id: E.state.ui.shareMealId } });
+    else if (kind === "share") actions["share-meal"]({ dataset: { id: E.state.ui.shareMealId, keep: "1" } });
+    else if (kind === "chat-meal-pick") openModal("chat-meal");
+    else if (kind === "chat-meal-type") {
+      const typed = (E.state.ui.chatMealText || "").trim();
+      if (typed) E.state.ui.chatMealDraft = E.mealFromText(typed);
+      openModal("chat-meal");
+    }
     else if (kind === "photo") actions["add-photo"]();
+    else if (kind === "report") openModal("weekly-report");
     else if (kind === "discover") { E.state.ui.chatTab = "discover"; E.render({ animate: false, keepScroll: true }); }
     else if (kind === "save") { if (E.state.scan) { E.state.scan.saveLater = true; E.render({ animate: false, keepScroll: true }); } }
     else if (kind === "measure") actions["save-measure"]();
@@ -408,6 +409,8 @@
     else if (key === "ob-name") ob.name = val;
     else if (key === "newEmail") ui.newEmail = val;
     else if (key === "describe") ui.describeText = val;
+    else if (key === "photo-note") ui.photoNote = val;
+    else if (key === "scan-fix") ui.scanFix = val;
     else if (key === "scan-name" && E.state.scan) E.state.scan.name = val;
     else if ((key === "item-name" || key === "item-kcal") && E.state.scan) {
       const it = (E.state.scan.items || [])[Number(el.dataset.idx)];
@@ -432,6 +435,10 @@
     else if (key === "city-q") ui.cityQuery = val;
     else if (key === "group-name") ui.groupName = val;
     else if (key === "share-note") ui.shareNote = val;
+    else if (key === "chat-meal-text") {
+      ui.chatMealText = val;
+      E.render({ animate: false, keepScroll: true });
+    }
     else if (key === "composer") ui.composer = val;
     else if (key === "comm-name") ui.commName = val;
     else if (key === "comm-city") ui.commCity = val;
@@ -465,6 +472,34 @@
   }
 
   function chatById(id) { return (E.state.chats || []).find(function (c) { return c.id === id; }); }
+  function firstName(name) { return String(name || "them").split(" ")[0]; }
+  function mealSnapshot(meal) {
+    const totals = E.mealTotals(meal);
+    return { name: meal.name, kcal: totals.kcal, p: totals.p, c: totals.c, f: totals.f, image: meal.image || "", emoji: meal.emoji || "🍽️" };
+  }
+  function postMealToChat(chat, meal, note) {
+    chat.messages.push({
+      id: E.uid("x"), from: "me", text: note || "", at: Date.now(), status: "read", meal: mealSnapshot(meal)
+    });
+    chat.preview = "Shared " + (meal.name || "a meal");
+    chat.time = Date.now();
+    chat.unread = 0;
+  }
+  function saveScanEntry(scan) {
+    const entry = { id: E.uid("m"), name: scan.name || "Meal", emoji: scan.emoji || "🍽️", image: scan.image, items: scan.items, mealType: scan.mealType || E.mealTypeByTime(), date: E.todayIso(), time: E.clock() };
+    E.state.meals.push(entry);
+    if (scan.saveLater) E.state.saved.unshift(JSON.parse(JSON.stringify(entry)));
+    return entry;
+  }
+  function leaveScan() {
+    const stack = E.state.nav.stack;
+    while (stack.length > 1) {
+      const id = stack[stack.length - 1].id;
+      if (id !== "scan-result" && id !== "scan") break;
+      stack.pop();
+    }
+    if (!stack.length) E.state.nav.stack = [{ id: "home" }];
+  }
 
   function autoReply(chat, text) {
     E.state.typing = chat.id;
@@ -504,8 +539,41 @@
     await sleep(900);
     E.state.ui.analyzing = false;
     E.state.ui.scanProgress = "";
+    if (E.state.ui.photoHeld) {
+      E.state.ui.photoNoteCount = (E.state.ui.photoNoteCount || 0) + 1;
+      E.state.ui.photoHeld = false;
+      E.state.ui.photoNote = "";
+      E.state.ui.photoNoteOpen = false;
+    }
     E.state.scan = builder();
     push("scan-result", {}, "up");
+  }
+  function buildPhotoScan(kind, note) {
+    let scan;
+    if (kind === "1") { scan = E.mealFromText("masala dosa"); scan.source = "photo"; }
+    else if (kind === "2") { scan = E.mealFromText("paneer salad"); scan.source = "photo"; scan.image = E.img.bowl; }
+    else if (kind === "3") { scan = E.mealFromText("oats"); scan.source = "photo"; }
+    else scan = E.scanPreset("photo");
+    scan.photoKind = kind || "camera";
+    return E.applyPhotoNote(scan, note);
+  }
+  function beginPhotoHold(kind) {
+    const ui = E.state.ui;
+    ui.photoHeld = true;
+    ui.photoKind = kind || "camera";
+    ui.photoNote = "";
+    ui.photoNoteOpen = (ui.photoNoteCount || 0) < 2;
+    ui.analyzing = false;
+    ui.scanError = "";
+    E.render({ animate: false, keepScroll: true });
+    const btn = document.querySelector("[data-testid=photo-estimate]");
+    if (btn && btn.scrollIntoView) btn.scrollIntoView({ block: "end" });
+  }
+  function startPhotoHold(kind) {
+    E.state.ui.photoKind = kind || "camera";
+    if (lockedScan()) { E.state.ui.pendingGate = "shutter"; openModal("paywall"); return; }
+    if (!E.state.user.ai) { E.state.ui.pendingGate = "shutter"; openModal("ai-consent"); return; }
+    beginPhotoHold(kind);
   }
   function resumePaywall() {
     const pending = E.state.pendingCheckout;
@@ -535,6 +603,11 @@
     const pending = E.state.pendingCheckout;
     const feature = E.state.ui.pendingFeature;
     const gate = E.state.ui.pendingGate;
+    const shareKeep = {
+      chat: E.state.ui.shareChat, note: E.state.ui.shareNote, meal: E.state.ui.shareMealId,
+      chatReturn: E.state.ui.chatReturn, chatMealChat: E.state.ui.chatMealChat,
+      chatMealPick: E.state.ui.chatMealPick, chatMealText: E.state.ui.chatMealText, chatMealLog: E.state.ui.chatMealLog
+    };
     const key = E.demoAccounts[email];
     const guestKeep = E.state.user && E.state.user.isGuest && E.state.user.onboarded && (!key || key === "custom");
     if (guestKeep) {
@@ -560,6 +633,14 @@
     if (pending) E.state.pendingCheckout = pending;
     if (feature) E.state.ui.pendingFeature = feature;
     if (gate) E.state.ui.pendingGate = gate;
+    if (shareKeep.meal) E.state.ui.shareMealId = shareKeep.meal;
+    if (shareKeep.chat) E.state.ui.shareChat = shareKeep.chat;
+    if (shareKeep.note) E.state.ui.shareNote = shareKeep.note;
+    if (shareKeep.chatReturn) E.state.ui.chatReturn = shareKeep.chatReturn;
+    if (shareKeep.chatMealChat) E.state.ui.chatMealChat = shareKeep.chatMealChat;
+    if (shareKeep.chatMealPick) E.state.ui.chatMealPick = shareKeep.chatMealPick;
+    if (shareKeep.chatMealText) E.state.ui.chatMealText = shareKeep.chatMealText;
+    if (shareKeep.chatMealLog === false) E.state.ui.chatMealLog = false;
     if (key === "sam") return;
     if (feature && resumePendingFeature()) {
       if (E.state.modal && E.state.modal.id === "paywall") toast("Pick up Pro where you left it");
@@ -571,6 +652,8 @@
   const actions = {
     back: function () {
       if (E.state.modal) { E.state.modal = null; E.render({ animate: false, keepScroll: true }); return; }
+      if (E.current() && E.current().id === "scan" && E.state.ui.photoHeld) { actions["retake-photo"](); return; }
+      if (E.current() && E.current().id === "scan") E.state.ui.chatReturn = "";
       pop();
     },
     go: function (el) {
@@ -914,37 +997,80 @@
       push("onboarding", {}, "up");
     },
     "open-scan": function (el) {
+      E.state.ui.chatReturn = "";
       E.state.ui.scanMode = "photo";
       E.state.ui.scanMealPreset = el && el.dataset.meal ? el.dataset.meal : null;
       E.state.ui.analyzing = false;
+      E.state.ui.photoHeld = false;
       E.state.ui.torch = false;
       push("scan", {}, "up");
     },
     "scan-mode": function (el) {
       E.state.ui.scanMode = el.dataset.mode;
       E.state.ui.analyzing = false;
+      E.state.ui.photoHeld = false;
       E.render({ animate: false, keepScroll: true });
     },
     torch: function () { E.state.ui.torch = !E.state.ui.torch; E.render({ animate: false, keepScroll: true }); },
     "allow-camera": function () { E.state.flags.cameraDenied = false; toast("Camera ready"); E.render({ animate: false }); },
     "open-gallery": function () { openModal("gallery"); },
     "pick-gallery": function (el) {
-      const sets = [
-        function () { return E.scanPreset("photo", E.img.thali); },
-        function () { const s = E.mealFromText("masala dosa"); s.source = "photo"; return s; },
-        function () { const s = E.mealFromText("paneer salad"); s.source = "photo"; s.image = E.img.bowl; return s; },
-        function () { const s = E.mealFromText("oats"); s.source = "photo"; return s; }
-      ];
       E.state.modal = null;
-      runScan(sets[Number(el.dataset.idx)] || sets[0]);
+      startPhotoHold(String(el.dataset.idx || "0"));
     },
     shutter: function () {
       if (E.state.flags.cameraDenied && E.state.ui.scanMode === "photo") return;
       const mode = E.state.ui.scanMode;
-      const kind = mode === "barcode" ? "barcode" : "shutter";
-      if (lockedScan()) { E.state.ui.pendingGate = kind; openModal("paywall"); return; }
-      if (kind === "shutter" && !E.state.user.ai) { E.state.ui.pendingGate = "shutter"; openModal("ai-consent"); return; }
-      runScan(function () { return E.scanPreset(mode === "barcode" ? "barcode" : "photo"); });
+      if (mode === "barcode") {
+        if (lockedScan()) { E.state.ui.pendingGate = "barcode"; openModal("paywall"); return; }
+        runScan(function () { return E.scanPreset("barcode"); });
+        return;
+      }
+      startPhotoHold("camera");
+    },
+    "retake-photo": function () {
+      E.state.ui.photoHeld = false;
+      E.state.ui.photoNote = "";
+      E.state.ui.photoNoteOpen = false;
+      E.state.ui.analyzing = false;
+      E.state.ui.scanError = "";
+      E.render({ animate: false, keepScroll: true });
+    },
+    "photo-note-open": function () {
+      E.state.ui.photoNoteOpen = true;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "photo-chip": function (el) {
+      const bit = el.dataset.value || "";
+      const cur = E.state.ui.photoNote || "";
+      if (bit && cur.toLowerCase().indexOf(bit.toLowerCase()) < 0) {
+        E.state.ui.photoNote = (cur ? cur.replace(/[,\s]+$/, "") + ", " : "") + bit;
+      }
+      E.state.ui.photoNoteOpen = true;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "estimate-photo": function () {
+      if (E.state.ui.analyzing) return;
+      const note = (E.state.ui.photoNote || "").trim();
+      const kind = E.state.ui.photoKind || "camera";
+      runScan(function () { return buildPhotoScan(kind, note); });
+    },
+    "rescan-note": async function () {
+      const scan = E.state.scan;
+      if (!scan || scan.source !== "photo" || E.state.ui.busy === "rescan") return;
+      const note = (E.state.ui.scanFix || "").trim() || scan.note || "";
+      if (!note) { toast("Add what the photo missed", "err"); return; }
+      E.state.ui.busy = "rescan";
+      E.render({ animate: false, keepScroll: true });
+      await sleep(600);
+      const next = buildPhotoScan(scan.photoKind || "camera", note);
+      next.mealType = scan.mealType;
+      next.saveLater = !!scan.saveLater;
+      E.state.scan = next;
+      E.state.ui.scanFix = "";
+      E.state.ui.busy = null;
+      toast("Estimate updated");
+      E.render({ animate: false, keepScroll: true });
     },
     "describe-chip": function (el) {
       E.state.ui.describeText = el.dataset.value;
@@ -989,11 +1115,30 @@
     "add-diary": function () {
       const scan = E.state.scan;
       if (!scan || !scan.items.length) { toast("Nothing to add", "err"); return; }
-      const entry = { id: E.uid("m"), name: scan.name || "Meal", emoji: scan.emoji || "🍽️", image: scan.image, items: scan.items, mealType: scan.mealType || E.mealTypeByTime(), date: E.todayIso(), time: E.clock() };
-      E.state.meals.push(entry);
-      if (scan.saveLater) E.state.saved.unshift(JSON.parse(JSON.stringify(entry)));
+      const entry = saveScanEntry(scan);
+      const chatId = E.state.ui.chatReturn;
       E.state.scan = null;
+      E.state.ui.chatReturn = "";
+      if (chatId) {
+        const chat = chatById(chatId);
+        if (chat) postMealToChat(chat, entry, "");
+        leaveScan();
+        E.state.ui.focusComposer = !!chat;
+        toast(chat ? "Sent to " + firstName(chat.name) + ". Also in your diary." : "Added to your diary");
+        E.render({ animate: true, transition: "fade" });
+        return;
+      }
       E.state.nav = { tab: "diary", stack: [{ id: "diary" }] };
+      toast("Added to your diary");
+      E.render({ animate: true, transition: "fade" });
+    },
+    "log-only": function () {
+      const scan = E.state.scan;
+      if (!scan || !scan.items.length) { toast("Nothing to add", "err"); return; }
+      saveScanEntry(scan);
+      E.state.scan = null;
+      E.state.ui.chatReturn = "";
+      leaveScan();
       toast("Added to your diary");
       E.render({ animate: true, transition: "fade" });
     },
@@ -1001,13 +1146,8 @@
       E.state.scan = null;
       E.state.ui.analyzing = false;
       E.state.ui.scanError = "";
-      const stack = E.state.nav.stack;
-      while (stack.length > 1) {
-        const id = stack[stack.length - 1].id;
-        if (id !== "scan-result" && id !== "scan") break;
-        stack.pop();
-      }
-      if (!stack.length) E.state.nav.stack = [{ id: "home" }];
+      E.state.ui.chatReturn = "";
+      leaveScan();
       toast("Scan discarded");
       E.render({ animate: true, transition: "fade" });
     },
@@ -1072,7 +1212,30 @@
     refresh: function () { toast("Updated just now"); },
     "week-shift": function (el) {
       const dir = Number(el.dataset.dir);
+      if (dir > 0 && (E.state.ui.progressWeek || 0) >= 0) return;
       E.state.ui.progressWeek = Math.min(0, (E.state.ui.progressWeek || 0) + dir);
+      E.render({ animate: false, keepScroll: true });
+    },
+    "open-report": function () { openModal("weekly-report"); },
+    "open-report-pro": function () {
+      E.state.ui.pendingGate = "report";
+      openModal("paywall");
+    },
+    "dismiss-report": function () {
+      E.state.ui.reportSeenWeek = E.weekMondayIso(0);
+      E.state.modal = null;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "photo-pose": function (el) {
+      E.state.ui.photoPose = el.dataset.value;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "delete-photo": function (el) {
+      ask({ title: "Delete this photo?", message: "It leaves this phone. It was never shared.", ok: "Delete", danger: true, action: "do-delete-photo", id: el.dataset.id });
+    },
+    "do-delete-photo": function (c) {
+      E.state.photos = (E.state.photos || []).filter(function (p) { return p.id !== c.id; });
+      toast("Photo deleted");
       E.render({ animate: false, keepScroll: true });
     },
     "weight-range": function (el) { E.state.ui.weightRange = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
@@ -1123,11 +1286,124 @@
     },
     ice: function (el) { E.state.ui.composer = el.dataset.value; actions.send(); },
     attach: function () {
-      const chat = chatById(E.currentParams().id);
-      if (!chat) return;
-      chat.messages.push({ id: E.uid("x"), from: "me", text: "", image: E.img.thali, at: Date.now(), status: "read" });
-      chat.preview = "Photo"; chat.time = Date.now();
+      const chat = chatById((E.currentParams() || {}).id);
+      if (!chat || chat.pending || chat.blocked) return;
+      E.state.ui.chatMealChat = chat.id;
+      E.state.ui.chatMealPick = "";
+      E.state.ui.chatMealText = "";
+      E.state.ui.chatMealDraft = null;
+      E.state.ui.chatMealLog = true;
+      E.state.ui.chatAddMode = "";
+      openModal("chat-meal");
+    },
+    "chat-add-mode": function (el) {
+      E.state.ui.chatAddMode = el.dataset.mode || "";
+      E.render({ animate: false, keepScroll: true });
+    },
+    "chat-add-back": function () {
+      E.state.ui.chatAddMode = "";
+      E.state.ui.chatMealDraft = null;
+      E.state.ui.chatMealPick = "";
+      E.state.ui.chatMealText = "";
+      E.render({ animate: false, keepScroll: true });
+    },
+    "chat-send-photo": function (el) {
+      const chat = chatById(E.state.ui.chatMealChat || (E.currentParams() || {}).id);
+      const src = el.dataset.src;
+      if (!chat || !src) return;
+      chat.messages.push({ id: E.uid("x"), from: "me", text: "", image: src, at: Date.now(), status: "read" });
+      chat.preview = "Photo";
+      chat.time = Date.now();
+      chat.unread = 0;
+      E.state.modal = null;
+      E.state.ui.chatAddMode = "";
+      E.state.ui.focusComposer = true;
+      toast("Photo sent");
       E.render({ animate: false });
+    },
+    "chat-pick-meal": function (el) {
+      const id = el.dataset.id;
+      E.state.ui.chatMealPick = E.state.ui.chatMealPick === id ? "" : id;
+      if (E.state.ui.chatMealPick) E.state.ui.chatMealText = "";
+      E.state.ui.chatMealDraft = null;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "chat-meal-log": function () {
+      E.state.ui.chatMealLog = E.state.ui.chatMealLog === false;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "chat-meal-clear": function () {
+      E.state.ui.chatMealDraft = null;
+      E.state.ui.chatMealText = "";
+      E.render({ animate: false, keepScroll: true });
+    },
+    "chat-meal-camera": function () {
+      const chat = chatById(E.state.ui.chatMealChat || (E.currentParams() || {}).id);
+      if (!chat) return;
+      E.state.ui.chatReturn = chat.id;
+      E.state.ui.scanMode = "photo";
+      E.state.ui.analyzing = false;
+      E.state.ui.photoHeld = false;
+      E.state.ui.torch = false;
+      E.state.modal = null;
+      push("scan", {}, "up");
+    },
+    "chat-meal-send": function () {
+      const ui = E.state.ui;
+      const chat = chatById(ui.chatMealChat || (E.currentParams() || {}).id);
+      if (!chat) return;
+      const picked = (E.state.meals || []).find(function (m) { return m.id === ui.chatMealPick && m.date === E.todayIso(); });
+      if (ui.chatMealDraft) {
+        if (!E.isPro()) {
+          ui.pendingGate = "chat-meal-type";
+          openModal("paywall");
+          return;
+        }
+        const draft = ui.chatMealDraft;
+        let meal = draft;
+        if (ui.chatMealLog !== false) {
+          meal = saveScanEntry(draft);
+        }
+        postMealToChat(chat, meal, "");
+        ui.chatMealDraft = null;
+        ui.chatMealText = "";
+        ui.chatMealPick = "";
+        E.state.modal = null;
+        ui.focusComposer = true;
+        toast("Sent to " + firstName(chat.name) + (ui.chatMealLog !== false ? ". Also in your diary." : ""));
+        E.render({ animate: false });
+        return;
+      }
+      if (picked) {
+        if (!E.isPro()) {
+          ui.pendingGate = "chat-meal-pick";
+          openModal("paywall");
+          return;
+        }
+        postMealToChat(chat, picked, (ui.chatMealText || "").trim());
+        ui.chatMealPick = "";
+        ui.chatMealText = "";
+        E.state.modal = null;
+        ui.focusComposer = true;
+        toast("Sent to " + firstName(chat.name));
+        E.render({ animate: false });
+        return;
+      }
+      const typed = (ui.chatMealText || "").trim();
+      if (!typed) { toast("Tap a photo or type what you ate"); return; }
+      if (!E.isPro()) {
+        ui.pendingGate = "chat-meal-type";
+        openModal("paywall");
+        return;
+      }
+      if (!E.state.user.ai) {
+        ui.pendingGate = "chat-meal-type";
+        openModal("ai-consent");
+        return;
+      }
+      ui.chatMealDraft = E.mealFromText(typed);
+      ui.chatMealPick = "";
+      E.render({ animate: false, keepScroll: true });
     },
     lightbox: function (el) { E.state.lightbox = el.dataset.src; E.render({ animate: false, keepScroll: true }); },
     "msg-actions": function (el) {
@@ -1436,16 +1712,24 @@
     },
     "share-meal": function (el) {
       const id = (el && el.dataset && el.dataset.id) || E.state.ui.shareMealId || (E.currentParams() || {}).id;
-      if (!E.isPro()) {
-        E.state.ui.shareMealId = id || "";
-        E.state.ui.pendingGate = "share";
-        openModal("paywall");
-        return;
-      }
+      const keep = el && el.dataset && el.dataset.keep === "1";
       E.state.ui.shareMealId = id || "";
-      E.state.ui.shareChat = null;
-      E.state.ui.shareNote = "";
-      openModal("share", { mealId: id });
+      if (!keep) {
+        E.state.ui.shareChat = null;
+        E.state.ui.shareNote = "";
+      }
+      openModal("share", { mealId: E.state.ui.shareMealId });
+    },
+    "open-chats": function () {
+      E.state.modal = null;
+      goTab("chat");
+    },
+    "open-shared-meal": function (el) {
+      const chat = chatById((E.currentParams() || {}).id);
+      const msg = chat && (chat.messages || []).find(function (m) { return m.id === el.dataset.mid; });
+      if (!msg || !msg.meal) return;
+      E.state.ui.sharedMeal = Object.assign({ note: msg.text || "" }, msg.meal);
+      openModal("shared-meal");
     },
     "gate-discover": function () {
       E.state.ui.pendingGate = "discover";
@@ -1453,16 +1737,21 @@
     },
     "pick-share": function (el) { E.state.ui.shareChat = el.dataset.id; E.render({ animate: false, keepScroll: true }); },
     "send-share": function () {
-      const meal = (E.state.meals || []).find(function (m) { return m.id === E.state.modal.mealId; });
+      const meal = (E.state.meals || []).find(function (m) { return m.id === ((E.state.modal && E.state.modal.mealId) || E.state.ui.shareMealId); });
       const chat = chatById(E.state.ui.shareChat);
       if (!meal || !chat) return;
-      const totals = E.mealTotals(meal);
-      chat.messages.push({ id: E.uid("x"), from: "me", text: E.state.ui.shareNote || "", meal: { name: meal.name, kcal: totals.kcal }, at: Date.now(), status: "read" });
-      chat.preview = "Shared " + meal.name;
-      chat.time = Date.now();
+      if (!E.isPro()) {
+        E.state.ui.pendingGate = "share";
+        E.state.ui.shareMealId = meal.id;
+        openModal("paywall");
+        return;
+      }
+      postMealToChat(chat, meal, E.state.ui.shareNote || "");
       E.state.modal = null;
-      toast("Meal shared");
+      E.state.ui.focusComposer = true;
+      E.state.nav.tab = "chat";
       E.state.nav.stack.push({ id: "thread", params: { id: chat.id } });
+      toast("Sent to " + chat.name);
       E.render({ animate: true, transition: "right" });
     },
     "pick-plan": function (el) { E.state.ui.selectedPlan = el.dataset.id; E.render({ animate: false, keepScroll: true }); },
@@ -1673,8 +1962,9 @@
     toast: function (el) { toast(el.dataset.msg || "Saved", el.dataset.kind); },
     "add-photo": function () {
       if (!E.isPro()) { E.state.ui.pendingGate = "photo"; openModal("paywall"); return; }
-      E.state.photos.unshift({ id: E.uid("ph"), date: E.todayIso(), caption: "Added just now", hue: Math.floor(Math.random() * 360) });
-      toast("Photo added");
+      const pose = E.state.ui.photoPose === "side" ? "side" : "front";
+      E.state.photos.unshift({ id: E.uid("ph"), date: E.todayIso(), caption: pose === "side" ? "Side, same corner" : "Front, same corner", hue: Math.floor(Math.random() * 360), pose: pose });
+      toast("Photo added. Only you can see it.");
       E.render({ animate: false, keepScroll: true });
     },
     "save-measure": function () {
@@ -1869,6 +2159,7 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && e.target.id === "composer") { e.preventDefault(); actions.send(); }
+    if (e.key === "Enter" && e.target.id === "photo-note") { e.preventDefault(); actions["estimate-photo"](); }
     if (e.key === "Enter" && e.target.dataset && e.target.dataset.model === "password") {
       e.preventDefault();
       if (E.current() && E.current().id === "register") actions.register();

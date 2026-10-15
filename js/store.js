@@ -151,6 +151,112 @@ window.EatAI = window.EatAI || {};
       return acc;
     }, { kcal: 0, p: 0, c: 0, f: 0 });
   };
+  E.weekMondayIso = function (offset) {
+    const day = new Date().getDay();
+    const back = (day === 0 ? -6 : 1 - day) + (offset || 0) * 7;
+    return E.iso(E.addDays(back));
+  };
+  E.weekDays = function (offset) {
+    const plan = (E.state.user && E.state.user.plan) || { kcal: 1, p: 1, c: 1, f: 1 };
+    const today = E.todayIso();
+    const monday = E.weekMondayIso(offset || 0);
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = E.addDays(i, monday);
+      const iso = E.iso(d);
+      const totals = E.dayTotals(iso);
+      const logged = E.dayMeals(iso).length > 0;
+      const over = logged && (totals.kcal > plan.kcal || totals.p > plan.p || totals.c > plan.c || totals.f > plan.f);
+      let status = "future";
+      if (iso < today) status = logged ? (over ? "warning" : "done") : "missed";
+      else if (iso === today) status = logged ? (over ? "warning" : "done") : "current";
+      days.push({
+        iso: iso, date: d.getDate(),
+        label: d.toLocaleDateString("en-IN", { weekday: "narrow" }),
+        status: status, totals: totals, logged: logged
+      });
+    }
+    return days;
+  };
+  E.weekSummary = function (days) {
+    const today = E.todayIso();
+    const logged = (days || []).filter(function (d) { return d.logged && d.iso <= today; });
+    const kcal = logged.reduce(function (s, d) { return s + d.totals.kcal; }, 0);
+    const protein = logged.reduce(function (s, d) { return s + d.totals.p; }, 0);
+    return {
+      logged: logged.length,
+      done: (days || []).filter(function (d) { return d.status === "done"; }).length,
+      avgKcal: logged.length ? kcal / logged.length : 0,
+      avgP: logged.length ? protein / logged.length : 0
+    };
+  };
+  E.weightTrend = function () {
+    const logs = (E.state.weightLog || []).slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    if (!logs.length) return { latest: null, trend: null, steady: false, today: null };
+    const recent = logs.slice(-7);
+    const trend = recent.reduce(function (s, l) { return s + Number(l.kg); }, 0) / recent.length;
+    const cutoff = E.iso(E.addDays(-21));
+    const window = logs.filter(function (l) { return l.date >= cutoff; });
+    const span = window.length >= 2 ? (E.parseIso(window[window.length - 1].date) - E.parseIso(window[0].date)) : 0;
+    const steady = window.length >= 2 && span >= 14 * 86400000 && Math.abs(window[window.length - 1].kg - window[0].kg) < 0.2;
+    const today = logs.filter(function (l) { return l.date === E.todayIso(); }).pop();
+    return { latest: logs[logs.length - 1].kg, trend: Math.round(trend * 10) / 10, steady: steady, today: today ? today.kg : null };
+  };
+  E.macroWeek = function (days) {
+    const plan = (E.state.user && E.state.user.plan) || { kcal: 1, p: 1 };
+    const today = E.todayIso();
+    const scored = (days || []).map(function (d) {
+      const logged = !!(d.logged && d.iso <= today);
+      let onTarget = false;
+      let score = 999;
+      if (logged) {
+        const calRatio = d.totals.kcal / (plan.kcal || 1);
+        const pRatio = d.totals.p / (plan.p || 1);
+        onTarget = calRatio >= 0.9 && calRatio <= 1.1 && pRatio >= 0.9;
+        score = Math.abs(calRatio - 1) + Math.abs(pRatio - 0.95);
+      }
+      return {
+        name: E.parseIso(d.iso).toLocaleDateString("en-IN", { weekday: "long" }),
+        protein: d.totals.p || 0,
+        logged: logged,
+        onTarget: onTarget,
+        score: score,
+        future: d.iso > today
+      };
+    });
+    let run = 0;
+    let longest = 0;
+    scored.forEach(function (d) {
+      if (d.future) return;
+      if (d.onTarget) { run += 1; longest = Math.max(longest, run); }
+      else run = 0;
+    });
+    const logged = scored.filter(function (d) { return d.logged; });
+    const hitDays = logged.filter(function (d) { return d.onTarget; }).length;
+    const avgProtein = logged.length ? Math.round(logged.reduce(function (s, d) { return s + d.protein; }, 0) / logged.length) : 0;
+    const proteinTarget = Math.round(plan.p || 0);
+    const ratio = proteinTarget > 0 ? avgProtein / proteinTarget : 1;
+    const u = E.state.user || {};
+    let focus = "Hit your protein target 5 days this week";
+    if (u.pregnancyStatus === "pregnant" || u.pregnancyStatus === "breastfeeding") focus = "Eat enough today. This plan does not ask you to cut.";
+    else if (ratio < 0.8) focus = "Aim for protein at every meal";
+    else if (hitDays <= 2) focus = "Start with one consistent meal a day";
+    else if (hitDays <= 5) focus = "You're close — try to log dinner before bed";
+    else if (hitDays >= 6) focus = "Keep doing what you're doing";
+    const best = logged.length ? logged.reduce(function (a, b) { return a.score <= b.score ? a : b; }) : null;
+    const worst = logged.length ? logged.reduce(function (a, b) { return a.score >= b.score ? a : b; }) : null;
+    return {
+      hitDays: hitDays,
+      avgProtein: avgProtein,
+      proteinTarget: proteinTarget,
+      longest: longest,
+      best: best ? best.name : "",
+      worst: worst ? worst.name : "",
+      sameDay: !!(best && worst && best.name === worst.name),
+      focus: focus,
+      logged: logged.length
+    };
+  };
   E.glassesOn = function (iso) {
     const rec = (E.state.waterLog || []).find(function (w) { return w.date === iso; });
     return rec ? rec.glasses : 0;
@@ -184,11 +290,13 @@ window.EatAI = window.EatAI || {};
       otpPurpose: "verify", loginEmail: "", resetEmail: "", passwordMode: "create",
       currentPassword: "", newPassword: "", pendingFeature: null, pendingGate: null, shareMealId: "",
       busy: null, chatTab: "chats", chatQuery: "", discoverQuery: "",
-      communityTab: "mine", communityQuery: "", diaryOffset: 0, progressWeek: 0,
+      communityTab: "mine", communityQuery: "", diaryOffset: 0, progressWeek: 0, reportSeenWeek: "", photoPose: "front",
       weightRange: "1M", weightDraft: 67, scanMode: "photo", torch: false,
       scanMealPreset: null, describeText: "", deleteAck: false, selectedPlan: "yearly",
       shareNote: "", shareChat: null, groupName: "", groupPicks: [], cityQuery: "",
+      chatMealChat: "", chatMealPick: "", chatMealText: "", chatMealDraft: null, chatMealLog: true, chatReturn: "",
       analyzing: false, analyzeTip: 0, scanError: "", scanProgress: "",
+      photoHeld: false, photoNote: "", photoNoteOpen: false, photoNoteCount: 0, photoKind: "camera", scanFix: "",
       commName: "", commAbout: "", commCity: "Bengaluru", commView: "feed", openPost: "",
       replyDraft: "", postDraft: "", nearMe: false, offerCode: "", offerError: "", offerOff: 0,
       billingProvider: "store", macroMode: "", chatStep: 0, customTitle: "", customTime: "15:00",
@@ -537,9 +645,9 @@ window.EatAI = window.EatAI || {};
       waterLog: [],
       weightLog: weightSeries(68.4, 66.9, 56),
       photos: [
-        { id: "ph1", date: E.iso(E.addDays(-21)), caption: "Week of check-in", hue: 70 },
-        { id: "ph2", date: E.iso(E.addDays(-14)), caption: "Same light, same corner", hue: 40 },
-        { id: "ph3", date: E.iso(E.addDays(-7)), caption: "After a steadier week", hue: 95 }
+        { id: "ph1", date: E.iso(E.addDays(-21)), caption: "Front, same corner", hue: 70, pose: "front" },
+        { id: "ph2", date: E.iso(E.addDays(-14)), caption: "Front, same light", hue: 40, pose: "front" },
+        { id: "ph3", date: E.iso(E.addDays(-7)), caption: "Side, same corner", hue: 95, pose: "side" }
       ],
       measurements: [
         { id: "ms1", date: E.iso(E.addDays(-28)), waist: 84, hips: 100, chest: 92 },
@@ -792,8 +900,50 @@ window.EatAI = window.EatAI || {};
     return {
       source: "photo", name: "Roti, dal & sabzi", image: image || E.img.thali, emoji: "🍛",
       mealType: E.state.ui.scanMealPreset || E.mealTypeByTime(), saveLater: false,
-      items: [item("Roti", "1 roti", 110, 4, 20, 2, 2), item("Dal", "1 bowl", 180, 12, 24, 5), item("Mixed sabzi", "1 katori", 140, 3, 12, 8)]
+      items: [item("Roti", "1 roti", 110, 4, 20, 2), item("Dal", "1 bowl", 180, 12, 24, 5), item("Mixed sabzi", "1 katori", 140, 3, 12, 8)]
     };
+  };
+  E.applyPhotoNote = function (scan, note) {
+    const text = String(note || "").trim();
+    scan.note = text;
+    if (!text) return scan;
+    const t = text.toLowerCase();
+    const roti = t.match(/(\d+)\s*rotis?/);
+    if (roti) {
+      const n = Math.max(1, Math.min(8, Number(roti[1])));
+      let row = (scan.items || []).find(function (it) { return /roti/i.test(it.name); });
+      if (!row) {
+        row = item("Roti", "1 roti", 110, 4, 20, 2);
+        scan.items.push(row);
+      }
+      row.qty = n;
+    }
+    if (/ghee/.test(t) && !(scan.items || []).some(function (it) { return /ghee/i.test(it.name); })) {
+      scan.items.push(item("Ghee", "1 spoon", 120, 0, 0, 13));
+    }
+    if (/less oil/.test(t)) {
+      (scan.items || []).forEach(function (it) {
+        if (/sabzi|curry|dal/i.test(it.name) && it.f > 2) {
+          it.f = Math.max(1, it.f - 3);
+          it.kcal = Math.max(40, it.kcal - 27);
+        }
+      });
+    }
+    if (/restaurant/.test(t) && !(scan.items || []).some(function (it) { return /restaurant oil/i.test(it.name); })) {
+      scan.items.push(item("Restaurant oil", "a little extra", 90, 0, 0, 10));
+    }
+    if (/half/.test(t) && /dal/.test(t)) {
+      (scan.items || []).forEach(function (it) {
+        if (/dal/i.test(it.name)) {
+          it.kcal = Math.max(1, Math.round(it.kcal / 2));
+          it.p = Math.max(0, Math.round(it.p / 2));
+          it.c = Math.max(0, Math.round(it.c / 2));
+          it.f = Math.max(0, Math.round(it.f / 2));
+          it.serving = "half katori";
+        }
+      });
+    }
+    return scan;
   };
 
   E.liveCoach = function () {

@@ -17,7 +17,7 @@
       ["droplet", "Water history", "Glasses and targets", "water-history", false],
       ["sparkles", "Coach history", "Daily check-ins", "coach-history", false],
       ["bookmark", "Saved meals", "Favorites and quick logging", "saved", false],
-      ["camera", "Progress photos", "Weekly gallery", "photos", false],
+      ["camera", "Progress photos", "Private, about every 2 weeks", "photos", false],
       ["ruler", "Measurements", "Body metrics", "measurements", false],
       ["users", "Communities", "Groups and discovery", "communities", true],
       ["bell", "Reminders", "Meal and weigh-in alerts", "reminders", true],
@@ -243,7 +243,8 @@
   E.screens["settings-photos"] = function () {
     const p = E.state.prefs.photos;
     return settingsShell("Progress photo alerts", "Weekly reminder and export",
-      '<div class="list-card">' + rowToggle("Weekly photo reminder", (p.day || "sun") + " · " + (p.time || "09:00"), p.weekly, "prefs.photos.weekly", !E.isPro()) + "</div>" +
+      '<div class="list-card">' + rowToggle("Photo reminder", "About every 2 weeks · " + (p.day || "sun") + " · " + (p.time || "09:00"), p.weekly, "prefs.photos.weekly", !E.isPro()) + "</div>" +
+      '<p class="caption mt8">Every week is too soon. Water and light change faster than your body.</p>' +
       '<div class="overline mt16">Reminder day</div><div class="mt8">' + E.chips(["sun", "mon", "wed", "fri"], p.day || "sun", "photo-day") + "</div>" +
       '<div class="mt12">' + E.chips(["07:00", "09:00", "18:00"], p.time, "photo-time") + "</div>" +
       '<div class="mt16">' + E.btn("Export gallery (demo)", { variant: "secondary", attrs: 'data-action="toast" data-msg="Would export your gallery"' }) + "</div>");
@@ -291,10 +292,35 @@
     return E.page({ top: E.topTitle("Coach history"), body: rows || E.empty({ emoji: "✨", title: "No notes yet" }) });
   };
   E.screens.photos = function () {
-    const cards = (E.state.photos || []).map(function (p) {
-      return '<div class="card mt12"><div class="photo" style="height:140px;border-radius:16px;background:hsl(' + p.hue + ',35%,78%)"><span>📷</span></div><div class="heading mt8" style="font-size:15px">' + E.esc(p.caption) + '</div><div class="caption">' + E.niceDate(p.date) + "</div></div>";
+    if (!E.isPro()) {
+      return E.page({
+        top: E.topTitle("Progress photos"),
+        body: E.empty({
+          emoji: "📷",
+          title: "These stay on your phone",
+          sub: "Private photos, about every 2 weeks. They are never sent in chat. Unlock with Pro to keep them.",
+          button: E.btn("Unlock with Pro", { attrs: 'data-action="add-photo" data-testid="photo-unlock"' })
+        })
+      });
+    }
+    const pose = E.state.ui.photoPose === "side" ? "side" : "front";
+    const photos = E.state.photos || [];
+    const cards = photos.map(function (p) {
+      return '<button type="button" class="card" data-longpress="delete-photo" data-id="' + p.id + '" data-testid="progress-photo" style="border:0;text-align:left;color:inherit"><div class="photo" style="height:120px;border-radius:16px;background:hsl(' + (p.hue || 40) + ',35%,78%)"><span>📷</span></div><div class="heading mt8" style="font-size:15px">' + E.esc(p.pose === "side" ? "Side" : "Front") + '</div><div class="caption">' + E.niceDate(p.date) + "</div></button>";
     }).join("");
-    return E.page({ top: E.topTitle("Progress photos"), body: cards + '<div class="mt16">' + E.btn("Add photo", { attrs: 'data-action="add-photo"' }) + "</div>" });
+    const same = photos.filter(function (p) { return (p.pose || "front") === "front"; }).slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    const compare = same.length >= 2
+      ? '<div class="overline mt16">Front, then and now</div><div class="photo-compare mt8" data-testid="photo-compare"><div class="card"><div class="photo" style="height:140px;border-radius:16px;background:hsl(' + same[0].hue + ',35%,78%)"><span>📷</span></div><div class="caption mt8">Then · ' + E.niceDate(same[0].date) + '</div></div><div class="card"><div class="photo" style="height:140px;border-radius:16px;background:hsl(' + same[same.length - 1].hue + ',35%,78%)"><span>📷</span></div><div class="caption mt8">Now · ' + E.niceDate(same[same.length - 1].date) + "</div></div></div><p class=\"caption mt8\">Same pose only. A front is never compared with a side.</p>"
+      : "";
+    const grid = cards ? '<div class="grid2 mt16">' + cards + "</div><p class=\"caption mt8\">Hold a photo to delete it.</p>" : E.empty({ emoji: "📷", title: "No photos yet", sub: "Add one when you feel ready. Same corner, same light." });
+    return E.page({
+      top: E.topTitle("Progress photos", "Only you"),
+      body: '<div class="hscroll">' +
+        '<button type="button" class="chip ' + (pose === "front" ? "on" : "") + '" data-action="photo-pose" data-value="front">Front</button>' +
+        '<button type="button" class="chip ' + (pose === "side" ? "on" : "") + '" data-action="photo-pose" data-value="side">Side</button></div>' +
+        '<div class="mt12">' + E.btn("Add " + pose + " photo", { attrs: 'data-action="add-photo" data-testid="photo-add"' }) + "</div>" +
+        compare + grid
+    });
   };
   E.screens.measurements = function () {
     const rows = (E.state.measurements || []).map(function (m) {

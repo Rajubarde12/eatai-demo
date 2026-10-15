@@ -143,7 +143,15 @@
       lastDay = day;
       const who = m.from === "me" ? "mine" : "them";
       let inner = "";
-      if (m.meal) inner += '<div class="caption" style="margin-bottom:4px">Shared a meal</div><b>' + E.esc(m.meal.name) + "</b><div>" + E.num(m.meal.kcal) + " kcal</div>";
+      if (m.meal) {
+        const meal = m.meal;
+        const photo = meal.image
+          ? '<img alt="" src="' + E.esc(meal.image) + '">'
+          : '<span class="ph">' + E.esc(meal.emoji || "🍽️") + "</span>";
+        const macros = (meal.p || meal.c || meal.f) ? " · P " + (meal.p || 0) + " · C " + (meal.c || 0) + " · F " + (meal.f || 0) : "";
+        inner += '<button type="button" class="meal-share-card" data-action="open-shared-meal" data-mid="' + m.id + '" data-testid="shared-meal-card">' +
+          photo + '<span class="grow"><span class="caption">Shared a meal</span><b>' + E.esc(meal.name) + '</b><span class="caption">' + E.num(meal.kcal) + " kcal" + macros + "</span></span></button>";
+      }
       if (m.image) inner += '<img alt="" src="' + E.esc(m.image) + '" data-src="' + E.esc(m.image) + '" style="width:180px;border-radius:12px;margin-bottom:6px" data-action="lightbox">';
       if (m.text) inner += E.esc(m.text);
       const meta = '<div class="caption" style="opacity:.7;margin-top:4px">' + (m.name ? E.esc(m.name) + " · " : "") + E.msgTime(m.at) + (m.from === "me" ? " ✓✓" : "") + "</div>";
@@ -154,7 +162,7 @@
       ["What did you eat today?", "Want to be accountability partners?", "Training today?"].map(function (t) {
         return '<button type="button" class="chip" data-action="ice" data-value="' + E.esc(t) + '">' + E.esc(t) + "</button>";
       }).join("") + "</div>" : "";
-    const composer = locked ? "" : ice + '<div class="compose-box"><button type="button" class="trail" data-action="attach" aria-label="Attach photo">' + E.icon("image") + '</button>' +
+    const composer = locked ? "" : ice + '<div class="compose-box"><button type="button" class="trail" data-action="attach" data-testid="chat-share-meal" aria-label="Photo or meal">' + E.icon("image") + '</button>' +
       '<textarea id="composer" data-model="composer" rows="1" placeholder="Message">' + E.esc(E.state.ui.composer || "") + '</textarea>' +
       '<button type="button" class="send" data-action="send" aria-label="Send">' + E.icon("send") + "</button></div>";
     return E.page({ top: top, composer: composer, body: banner + '<div id="msg-list">' + msgs + typing + "</div>" });
@@ -292,16 +300,139 @@
       "</div><div class=\"mt16\">" + E.btn("Create", { attrs: 'data-action="submit-community"' }) + "</div></div>";
   };
 
+  function sharePeople() {
+    return (E.state.chats || []).filter(function (c) {
+      return c.type !== "group" && !c.pending && !c.blocked;
+    }).slice().sort(function (a, b) { return (b.time || 0) - (a.time || 0); });
+  }
+  function youngShare() {
+    const u = E.state.user || {};
+    return !!(u.ageBlocked || E.age(u.birthYear, u.birthMonth) < 18);
+  }
   E.modals.share = function () {
-    const meal = (E.state.meals || []).find(function (m) { return m.id === (E.state.modal || {}).mealId; });
-    const targets = (E.state.chats || []).filter(function (c) { return !c.pending && !c.blocked; }).map(function (c) {
-      return '<button type="button" class="nav-row" data-action="pick-share" data-id="' + c.id + '">' + E.avatar({ name: c.name, color: c.color, initials: c.initials, size: 36 }) +
-        '<span class="grow">' + E.esc(c.name) + "</span>" + (E.state.ui.shareChat === c.id ? E.icon("check") : "") + "</button>";
+    const ui = E.state.ui;
+    const meal = (E.state.meals || []).find(function (m) { return m.id === (E.state.modal || {}).mealId; }) ||
+      (E.state.meals || []).find(function (m) { return m.id === ui.shareMealId; });
+    const totals = meal ? E.mealTotals(meal) : { kcal: 0, p: 0, c: 0, f: 0 };
+    const photo = meal && meal.image
+      ? '<img alt="" src="' + E.esc(meal.image) + '">'
+      : '<span class="ph">' + E.esc((meal && meal.emoji) || "🍽️") + "</span>";
+    const strip = '<div class="meal-strip">' + photo +
+      '<span class="grow"><b>' + E.esc(meal ? meal.name : "Meal") + "</b>" +
+      '<span class="caption">' + E.num(totals.kcal) + " kcal · P " + totals.p + " · C " + totals.c + " · F " + totals.f + "</span></span></div>";
+    let body = "";
+    let dock = "";
+    if (youngShare()) {
+      body = E.empty({
+        emoji: "🌱",
+        title: "Sharing opens at 18",
+        sub: "This meal stays in your diary. Chat sharing opens with chat, at 18."
+      });
+      dock = E.btn("Back to meal", { attrs: 'data-action="close-modal" data-testid="share-back-meal"' });
+    } else {
+      const people = sharePeople();
+      const chosen = people.find(function (p) { return p.id === ui.shareChat; });
+      if (!people.length) {
+        body = E.empty({
+          emoji: "👋",
+          title: "No one to send this to yet",
+          sub: "Accept a chat first. Then you can send this meal."
+        });
+        dock = E.btn("Open chats", { attrs: 'data-action="open-chats" data-testid="share-open-chats"' });
+      } else {
+        body = '<div class="heading mt16" style="font-size:16px">Send to</div><div class="list-card mt8">' + people.map(function (c) {
+          const on = ui.shareChat === c.id;
+          return '<button type="button" class="nav-row' + (on ? " on" : "") + '" data-action="pick-share" data-id="' + c.id + '" data-testid="share-friend">' +
+            E.avatar({ name: c.name, color: c.color, initials: c.initials, size: 42 }) +
+            '<span class="grow"><span class="heading" style="font-size:15px">' + E.esc(c.name) + '</span><span class="caption">' + E.esc(c.preview || "Chat") + "</span></span>" +
+            (on ? E.icon("check") : "") + "</button>";
+        }).join("") + "</div>" +
+          '<div class="mt12">' + E.field({ label: "Note", id: "snote", model: "share-note", value: ui.shareNote, placeholder: "Optional note" }) + "</div>";
+        const label = !chosen ? "Choose one person" : ("Send to " + chosen.name + (E.isPro() ? "" : " · Pro"));
+        dock = E.btn(label, { disabled: !chosen, attrs: 'data-action="send-share" data-testid="share-send"' });
+      }
+    }
+    return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet share-sheet"><div class="grabber"></div>' +
+      strip + body + '<div class="share-dock">' + dock + "</div></div></div>";
+  };
+  E.modals["shared-meal"] = function () {
+    const meal = E.state.ui.sharedMeal || {};
+    const photo = meal.image
+      ? '<img alt="" src="' + E.esc(meal.image) + '">'
+      : '<span class="ph">' + E.esc(meal.emoji || "🍽️") + "</span>";
+    return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet share-sheet"><div class="grabber"></div>' +
+      '<div class="heading">Shared meal</div><p class="caption mt8">Only this meal. The rest of the diary stays private.</p>' +
+      '<div class="meal-strip mt12">' + photo + '<span class="grow"><b>' + E.esc(meal.name || "Meal") + "</b>" +
+      '<span class="caption">' + E.num(meal.kcal || 0) + " kcal · P " + (meal.p || 0) + " · C " + (meal.c || 0) + " · F " + (meal.f || 0) + "</span></span></div>" +
+      (meal.note ? '<p class="body mt12">' + E.esc(meal.note) + "</p>" : "") +
+      '<div class="share-dock">' + E.btn("Close", { variant: "secondary", attrs: 'data-action="close-modal" data-testid="shared-meal-close"' }) + "</div></div></div>";
+  };
+
+  E.modals["chat-meal"] = function () {
+    const ui = E.state.ui;
+    const chat = (E.state.chats || []).find(function (c) { return c.id === (ui.chatMealChat || (E.currentParams() || {}).id); });
+    const who = chat ? String(chat.name || "them").split(" ")[0] : "them";
+    if (youngShare() || !chat) {
+      return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet share-sheet"><div class="grabber"></div>' +
+        E.empty({ emoji: "🌱", title: "Sharing opens at 18", sub: "This chat stays about messages. Meal sharing opens with chat, at 18." }) +
+        '<div class="share-dock">' + E.btn("Back to chat", { attrs: 'data-action="close-modal" data-testid="chat-meal-back"' }) + "</div></div></div>";
+    }
+    if (!ui.chatAddMode && !ui.chatMealDraft) {
+      return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet share-sheet"><div class="grabber"></div>' +
+        '<div class="heading">Add to this chat</div>' +
+        '<p class="caption mt8">A photo is just a picture. A meal includes calories.</p>' +
+        '<div class="list-card mt16">' +
+        '<button type="button" class="nav-row" data-action="chat-add-mode" data-mode="photo" data-testid="chat-photo-mode"><span class="ico-sq">' + E.icon("image") + '</span><span class="grow"><b>Photo</b><span class="caption">Sends a picture. Nothing is logged.</span></span></button>' +
+        '<button type="button" class="nav-row" data-action="chat-add-mode" data-mode="meal" data-testid="chat-meal-mode"><span class="ico-sq">' + E.icon("utensils") + '</span><span class="grow"><b>Meal</b><span class="caption">From today, typed, or a food photo.</span></span></button>' +
+        "</div></div></div>";
+    }
+    if (ui.chatAddMode === "photo" && !ui.chatMealDraft) {
+      const pics = [E.img.fruit, E.img.bowl, E.img.spread, E.img.thali];
+      const tiles = pics.map(function (src) {
+        return '<button type="button" class="meal-pick" data-action="chat-send-photo" data-src="' + E.esc(src) + '" data-testid="chat-plain-photo"><img alt="" src="' + E.esc(src) + '"></button>';
+      }).join("");
+      return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet share-sheet"><div class="grabber"></div>' +
+        '<div class="heading">Send a photo</div>' +
+        '<p class="caption mt8">' + E.esc(who) + ' sees the picture only. No calories, and it stays out of your diary.</p>' +
+        '<div class="meal-picks mt16">' + tiles + "</div>" +
+        '<div class="share-dock">' + E.btn("Back", { variant: "secondary", attrs: 'data-action="chat-add-back" data-testid="chat-photo-back"' }) + "</div></div></div>";
+    }
+    const draft = ui.chatMealDraft;
+    if (draft) {
+      const totals = E.mealTotals(draft);
+      const photo = draft.image ? '<img alt="" src="' + E.esc(draft.image) + '">' : '<span class="ph">' + E.esc(draft.emoji || "🍽️") + "</span>";
+      return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet share-sheet"><div class="grabber"></div>' +
+        '<div class="heading">Send this to ' + E.esc(who) + '?</div>' +
+        '<p class="caption mt8">Check the estimate first. ' + E.esc(who) + ' only sees this meal.</p>' +
+        '<div class="meal-strip mt12">' + photo + '<span class="grow"><b>' + E.esc(draft.name || "Meal") + "</b>" +
+        '<span class="caption">' + E.num(totals.kcal) + " kcal · P " + totals.p + " · C " + totals.c + " · F " + totals.f + "</span></span></div>" +
+        '<div class="card mt12 between"><div><div class="heading" style="font-size:15px">Also add to my diary</div><div class="caption">Same meal, logged for you today.</div></div>' +
+        E.switch(ui.chatMealLog !== false, 'data-action="chat-meal-log" data-testid="chat-meal-log"') + "</div>" +
+        '<div class="share-dock">' + E.btn("Send to " + who, { attrs: 'data-action="chat-meal-send" data-testid="chat-meal-send"' }) +
+        '<div class="mt8">' + E.btn("Not this meal", { variant: "ghost", attrs: 'data-action="chat-meal-clear" data-testid="chat-meal-clear"' }) + "</div></div></div></div>";
+    }
+    const today = (E.state.meals || []).filter(function (m) { return m.date === E.todayIso(); });
+    const picks = today.map(function (m) {
+      const on = ui.chatMealPick === m.id ? " on" : "";
+      const photo = m.image ? '<img alt="" src="' + E.esc(m.image) + '">' : '<span class="ph">' + E.esc(m.emoji || "🍽️") + "</span>";
+      return '<button type="button" class="meal-pick' + on + '" data-action="chat-pick-meal" data-id="' + E.esc(m.id) + '" data-testid="chat-meal-photo">' +
+        photo + "<b>" + E.esc(m.name) + "</b></button>";
     }).join("");
-    const preview = meal ? '<div class="card mt12"><div class="overline">Preview</div><div class="heading mt8">' + E.esc(meal.name) + "</div><div class=\"caption\">" + E.num(E.mealTotals(meal).kcal) + " kcal</div></div>" : "";
-    return '<div class="modal-wrap" style="background:var(--canvas);overflow:auto;padding:16px 18px 24px"><div class="between"><button type="button" class="icon-btn" data-action="close-modal">' + E.icon("x") + '</button><div class="heading">Share meal</div><span style="width:44px"></span></div>' +
-      preview + '<div class="mt12">' + E.field({ label: "Note", id: "snote", model: "share-note", value: E.state.ui.shareNote, placeholder: "Optional note" }) + "</div>" +
-      '<div class="list-card mt12">' + targets + "</div>" +
-      '<div class="mt16">' + E.btn("Send", { disabled: !E.state.ui.shareChat, attrs: 'data-action="send-share"' }) + "</div></div>";
+    const typed = (ui.chatMealText || "").trim();
+    const picked = today.some(function (m) { return m.id === ui.chatMealPick; });
+    let label = "Tap a photo or type a meal";
+    if (picked) label = "Send to " + who + (E.isPro() ? "" : " · Pro");
+    else if (typed) label = (E.isPro() ? "Estimate and review" : "Estimate · Pro");
+    const photos = picks
+      ? '<div class="overline mt16">From today</div><div class="meal-picks mt8">' + picks + "</div>"
+      : '<p class="caption mt16">Nothing logged today. Type it, or take a photo.</p>';
+    return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet share-sheet"><div class="grabber"></div>' +
+      '<button type="button" class="caption" data-action="chat-add-back" style="border:0;background:transparent;padding:0">Back</button>' +
+      '<div class="heading mt8">Send a meal to ' + E.esc(who) + '</div>' +
+      '<p class="caption mt8">' + E.esc(who) + ' only sees this meal, not the rest of your diary.</p>' +
+      photos +
+      '<div class="mt12">' + E.field({ label: picked ? "Note" : "Or type what you ate", id: "chat-meal-text", model: "chat-meal-text", value: ui.chatMealText, placeholder: picked ? "Optional note" : "2 roti, dal, and salad" }) + "</div>" +
+      '<button type="button" class="nav-row mt12" data-action="chat-meal-camera" data-testid="chat-meal-camera"><span class="ico-sq">' + E.icon("camera") + '</span><span class="grow"><b>Food photo</b><span class="caption">Estimate calories, then send the meal</span></span></button>' +
+      '<div class="share-dock">' + E.btn(label, { disabled: !picked && !typed, attrs: 'data-action="chat-meal-send" data-testid="chat-meal-send"' }) + "</div></div></div>";
   };
 })();
