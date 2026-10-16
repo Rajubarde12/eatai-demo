@@ -1,10 +1,71 @@
 # Demo changes and new features
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
 
 Main app (`eatai-app` + `eatAi`) mein kuch dalne se pehle yeh file padho. Yahan sirf `eatai-demo` ka hisaab hai: kya naya dikhta hai, kaunsa flow badla, aur kya main app mein pehle se hai.
 
-Demo local browser prototype hai. Sign-in, scan, aur payment simulated hain. Purana saved demo `eatai-demo-v2` key par nahi tikta — refresh naya install hai.
+Demo local browser prototype hai. Sign-in, scan, aur payment simulated hain. Purana saved demo `eatai-demo-v2` key par nahi tikta — refresh naya install hai (`eatai-demo-v3`).
+
+## Naya — supporting features ko aasaan banaya (chat, community, progress, weight, diary)
+
+Sirf demo. User ki tarah browser mein chala kar mile hue problems.
+
+- **Har confirm dialog ka bug:** backdrop buttons ke upar tha, Cancel/OK par tap nahi lagta tha. `.dialog { position: relative }` se theek.
+- **Meal edit:** log hone ke baad galat amount theek karne ka koi rasta nahi tha (sirf Share/Delete). Food detail par **Edit amount or calories** (`meal-edit`) → wahi scan-result screen “Editing a logged meal” mode mein, − + / naam / kcal / meal type → **Save changes** (`edit-save`) ya Cancel (`edit-cancel`). Toast “Meal updated · N kcal”. Upar ke icons par aria-label (Back, Share meal, Delete meal `meal-delete`).
+- **Chat:** thread header mein ⋮ (`chat-more`, groups ko chhod kar) → sheet: Report / Block (“X won't be told”). Block ab confirm maangta hai. Blocked banner par **Unblock** (`chat-unblock`). Chat list mein request bheji ho to ✓✓ ki jagah ⏳, blocked par 🚫.
+- **Community:** Leave ab confirm ke saath (`community-leave`, ghost button). Doosron ke post par 🚩 report (`post-report`) → post chhup jata hai, My reports mein jata hai. Post box feed ke upar card mein (`post-draft`, `post-send`). Join nahi kiya to “Join to post and reply”. “1 reply / N replies” grammar, post par time.
+- **Weight:** number par tap karke type kar sakte ho (`weight-input`, decimal, comma bhi chalega, Enter = save). 35–220 kg ke bahar error. Toast: “Saved 63.4 kg · ▼ 0.4 kg since last · 3.4 kg to goal” (protected plan / health goal par goal wala hissa nahi). Progress par “🎯 Goal X kg · Y kg to go” (`weight-goal`).
+- **Progress:** chart labels “16 Oct” style, kam ticks. Calorie chart ke neeche “- - - Your goal N kcal”. Avg protein “37/120g”. Free user ko “Freezes left 0” ki jagah “📅 N/7 Days logged”.
+- **Streak calendar:** 7 columns screen se bahar ja rahe the (Sat/Sun kat jate) → `minmax(0,1fr)`. Streak number ab meals se nikalta hai (`E.syncStreak`), calendar se match karta hai.
+- **Privacy:** Discovery pause chips wrap hote hain (“Until I return” kat raha tha).
+
+### App mein kaise jayega
+
+- Meal edit: app ke diary meal detail par edit → `PATCH` meal (dekho pehle se route hai ya nahi; nahi to naya). Kcal client par recalc, server par save.
+- Chat header menu, block confirm, unblock banner, community leave confirm + post report: app ke existing block/report APIs use karo.
+- Weight number input + range check + toast copy. Streak: server ka `streak` hi dikhao.
+
+## Naya — free first meal: store ka 3-day free trial, Food list, chhota onboarding
+
+Yeh abhi sirf demo mein hai. Main app mein tab daalo jab demo approve ho. Wajah: pehle free user ka har scan paywall tha aur "Eat it again" khali tha, to naya guest ek bhi meal log nahi kar pata tha.
+
+- **Daily free scans nahi hain.** AI Photo, Describe aur Barcode Pro hi hain. Free user ke liye **Food list** free hai. Scan par banner (`scan-lock`): “AI photo scan is part of Pro · Try it free for 3 days. The Food list stays free.” → paywall.
+- Paywall par **Start 3-day free trial** (`paywall-trial`) jo App Store / Play Store deta hai, autopay ke saath. Neeche saaf likha: “Free until <date>. Then ₹X every year, auto-paid by the store. Cancel before then and you pay nothing.” **Pay now** (`paywall-buy`) alag. Trial ek baar hi (`trialUsed`). Guest pehle email deta hai (“Add your email to start your 3-day free trial”), phir paywall par wapas.
+- Trial cancel: “You won't be charged” copy, Pro trial end date tak chalta hai. Cancelled sub `endsAt` tak Pro.
+- Scan mein naya mode **Food list** (Photo · Food list · Describe · Barcode). ~30 Indian ghar ke khane, Hinglish search (anda, chawal, dahi, kela). Tap → scan-result (− + se amount, naam/kcal edit) → Add to diary. AI nahi, consent nahi, Pro nahi.
+- AI consent par **Not now** ab dead end nahi: Food list khulti hai, laal error nahi. Paywall par scan gate ho to **Not now, use the food list**.
+- Guest paywall par pehle “Why this stopped”, phir “Add your email to see Pro”.
+- Home: jis din meal nahi, hero ke neeche **Log your first meal / What did you eat?** card: Snap a photo, Food list, aur chips (Dal chawal, 2 roti + sabzi, Poha, Chai + biscuit). Chip se 2 taps mein log. Khali “Eat it again” chhupa. Coach meal se pehle “139g short” nahi bolta, “Start with one meal” bolta hai.
+- Streak ab sach mein chalti hai: din ka pehla meal +1, gap ke baad 1 se. Ek din mein do baar nahi. Pehla meal kabhi → **First meal logged** sheet (Day 1, kcal left, guest ko email ka halka note).
+- Onboarding: single-choice steps (goal, gender agar female nahi, pace, activity, exercise, diet) tap par khud aage. Birth year type kar sakte ho (1940–2015, galat par message). Pehli baar ke onboarding se **training** aur **discovery** hata diye — chat setup (`pendingChatFields`) inhe pehle se poochta hai. Recalculate plan (edit mode) mein dono hain. Ramesh: 43 taps → ~16.
+- Profile → **Bigger text** switch (Sunita). Caption 12→15px, body 15→18px, buttons bade.
+- Welcome par thali + “✓ 3-day free Pro trial · No sign-up to start”. Paywall headline “Log without limits” (purana “2× faster” bina proof ka claim tha).
+- Assets par `?v=3.1` taaki tester ko purani cached JS na mile.
+- Tests: `cd eatai-demo/tests && npm install && npm test` (Playwright, 13 checks, har persona par har screen render).
+
+### App mein kaise jayega
+
+- Scan sheet mein Food list tab. Home par first-meal card + combo chips. `(tabs)/index.tsx` empty state ko upar lao.
+- Consent decline par Food list par bhejo. Paywall copy mein free scan wajah.
+- Onboarding auto-advance + year input. Training/discovery ko chat setup par chhodo.
+- Bigger text: app mein OS font scale already chalta hai; check karo `allowFontScaling` kahin band to nahi, aur ek in-app toggle socho.
+
+### Backend mein kya update lagega
+
+- AI scan ke liye backend jaisa hai waisa: free ko 403 `PREMIUM_REQUIRED`. Koi daily free-scan counter nahi chahiye. Trial store (IAP intro offer / Play free trial) deta hai; backend sirf receipt/webhook se `status: trial` + `renewsAt` save kare aur trial ko Pro maane. Ek user ko ek hi trial.
+- Food list: naya `GET /foods/search?q=` — `foodLookup.service.ts` ka `lookupByName` andar hai, public route nahi. Pehle static Indian list (demo wali) se shuru karo. Free, bina AI consent.
+- Streak: `confirm-scan` pehle se `streak` lautata hai — client par woh dikhao, khud mat ginno.
+
+## Naya — diary search, streak history, week card, photo read, coach, reminders
+
+Yeh abhi sirf demo mein hai. Main app mein tab daalo jab demo approve ho. FitnessApp mein yeh screens pehle se hain.
+
+- Diary search saare logged meals mein naam se chalata hai. Har meal par **Log today** / **Log again**, **Share**, aur **Star**. Star Eat it again mein jata hai. 10 saved meals ke baad free user par Pro.
+- Streak settings: **This week**, **Daily streak log**, **Ended streaks**. Calendar 7 / 14 / 30 / 40 / 100 din: counted, logged, missed, freeze. Hit-goal streak aur monthly freeze Pro. Ended streaks Pro: length aur reason (missed day, no freeze left, reset). Home chip free rehta hai.
+- Weekly report ke neeche **Share this week**. Card mein hit days, protein, streak, aur focus. Chat mein sirf woh card. Free par pehle reason, phir paywall. Under 18 par “Sharing opens at 18”.
+- Progress photo par **Get AI read**. Same pose, do photos. Copy estimate hai, measurement nahi. Pro, aur AI consent. Consent ke bina read nahi.
+- Coach history: last weekly hit-days bars, note kholo, delete, clear history.
+- Custom reminder: edit title aur time, ya delete.
 
 ## Flow change — demo only, main app mein mat daalo
 
@@ -111,3 +172,7 @@ Agli demo entry yahin likho. Main app mein yeh dubara mat lagaana.
 - `priya@eat.ai` / `rahul@eat.ai` password `EatAI1!`. `sam@demo.app` aur `aisha@eat.ai` code se login.
 - Razorpay par offer `SAVE20`.
 - Version long-press: personas aur Slow network.
+- Diary search: `poha` ya `dosa`, phir **Log today**.
+- Naya guest: Get started → Home par **Dal chawal** chip → Add to diary. Scan mein teen photo scan, chautha paywall. **Food list** mein `anda` search.
+- Profile → **Bigger text**.
+- Streak: Profile → Streak. Hit goal aur freeze Pro. Rahul (`?persona=rahul`) pehle se Pro hai, isliye freeze aur AI read seed se khulte hain.

@@ -1,7 +1,7 @@
 window.EatAI = window.EatAI || {};
 (function () {
   const E = window.EatAI;
-  const KEY = "eatai-demo-v2";
+  const KEY = "eatai-demo-v3";
 
   E.img = {
     dosa: "https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=900&q=70",
@@ -257,13 +257,172 @@ window.EatAI = window.EatAI || {};
       logged: logged.length
     };
   };
+  E.dayHit = function (iso) {
+    const plan = (E.state.user && E.state.user.plan) || { kcal: 1, p: 1 };
+    if (!E.dayMeals(iso).length) return false;
+    const totals = E.dayTotals(iso);
+    const cal = totals.kcal / (plan.kcal || 1);
+    const protein = totals.p / (plan.p || 1);
+    return cal >= 0.9 && cal <= 1.1 && protein >= 0.9;
+  };
+  E.streakDays = function (count) {
+    const n = count || 14;
+    const today = E.todayIso();
+    const prefs = (E.state.prefs && E.state.prefs.streak) || {};
+    const goalMode = prefs.mode === "goal" && E.isPro();
+    const freezeOn = !!(E.isPro() && prefs.freeze);
+    const month = today.slice(0, 7);
+    let freezeIso = "";
+    if (freezeOn) {
+      for (let i = 1; i < 40; i++) {
+        const iso = E.iso(E.addDays(-i));
+        if (iso.slice(0, 7) !== month) break;
+        if (!E.dayMeals(iso).length) { freezeIso = iso; break; }
+      }
+    }
+    const days = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const iso = E.iso(E.addDays(-i));
+      const d = E.parseIso(iso);
+      const meals = E.dayMeals(iso);
+      let status = "missed";
+      let source = "No meal logged";
+      if (iso > today) { status = "future"; source = "Still ahead"; }
+      else if (iso === freezeIso) { status = "freeze"; source = "Monthly freeze"; }
+      else if (meals.length) {
+        if (goalMode && !E.dayHit(iso)) { status = "logged"; source = "Meal logged, goal not hit"; }
+        else { status = "counted"; source = meals.length + " meal" + (meals.length > 1 ? "s" : ""); }
+      }
+      days.push({
+        iso: iso,
+        date: d.getDate(),
+        dow: d.toLocaleDateString("en-IN", { weekday: "short" }),
+        status: status,
+        source: source,
+        kcal: E.dayTotals(iso).kcal,
+        meals: meals.length
+      });
+    }
+    return days;
+  };
+  E.photoRead = function (a, b) {
+    if (!a || !b) return { ok: false, title: "Need two photos", body: "Add another photo in the same pose. A front is only read against a front." };
+    const poseA = a.pose || "front";
+    const poseB = b.pose || "front";
+    if (poseA !== poseB) return { ok: false, title: "Poses don't match", body: "A front is never compared with a side. Pick the same pose." };
+    const days = Math.max(0, Math.round(Math.abs(E.parseIso(b.date) - E.parseIso(a.date)) / 86400000));
+    const pose = poseA === "side" ? "Side" : "Front";
+    return {
+      ok: true,
+      title: "A quiet read",
+      body: pose + " photos, " + days + " days apart. The light and stance look close enough to glance at. Any change here is small.",
+      tip: "Same corner, same time of day, next time. This is an estimate, not a measurement, and not medical advice."
+    };
+  };
   E.glassesOn = function (iso) {
     const rec = (E.state.waterLog || []).find(function (w) { return w.date === iso; });
     return rec ? rec.glasses : 0;
   };
   E.isPro = function () {
-    const s = E.state.user.subscription.status;
-    return s === "active" || s === "trial";
+    const sub = E.state.user.subscription;
+    if (sub.status === "cancelled") return !!sub.endsAt && sub.endsAt >= E.todayIso();
+    return sub.status === "active" || sub.status === "trial";
+  };
+
+  E.planPrices = { yearly: 1999, sixmonth: 999, monthly: 299 };
+  E.trialOpen = function () {
+    const sub = E.state.user.subscription;
+    return !E.isPro() && !sub.trialUsed && sub.status !== "cancelled";
+  };
+
+  E.syncStreak = function () {
+    const u = E.state.user;
+    if (!u || !u.streak || !E.state.meals) return;
+    const days = E.streakDays(100);
+    let i = days.length - 1;
+    if (days[i] && days[i].status !== "counted" && days[i].status !== "freeze") i -= 1;
+    let run = 0;
+    for (; i >= 0; i--) {
+      if (days[i].status === "counted" || days[i].status === "freeze") run += 1;
+      else break;
+    }
+    u.streak.current = run;
+    u.streak.best = Math.max(u.streak.best || 0, run);
+  };
+
+  E.bumpStreak = function () {
+    const u = E.state.user;
+    if (!u || !u.streak) return false;
+    const today = E.todayIso();
+    const first = u.streak.lastIso !== today && E.dayMeals(today).length === 1;
+    u.streak.lastIso = today;
+    E.syncStreak();
+    return first;
+  };
+
+  E.foodList = [
+    { id: "roti", emoji: "🫓", name: "Roti", serving: "1 roti", kcal: 120, p: 4, c: 22, f: 2, alias: "chapati phulka" },
+    { id: "rice", emoji: "🍚", name: "Rice", serving: "1 katori", kcal: 200, p: 4, c: 44, f: 1, alias: "chawal" },
+    { id: "dal", emoji: "🥣", name: "Dal", serving: "1 katori", kcal: 180, p: 12, c: 24, f: 5, alias: "daal tadka" },
+    { id: "rajma", emoji: "🫘", name: "Rajma", serving: "1 katori", kcal: 240, p: 14, c: 36, f: 5, alias: "kidney beans" },
+    { id: "chole", emoji: "🫘", name: "Chole", serving: "1 katori", kcal: 260, p: 12, c: 34, f: 9, alias: "chana chickpea" },
+    { id: "sabzi", emoji: "🥬", name: "Mixed sabzi", serving: "1 katori", kcal: 140, p: 3, c: 12, f: 8, alias: "vegetable bhaji" },
+    { id: "aloo", emoji: "🥔", name: "Aloo sabzi", serving: "1 katori", kcal: 180, p: 3, c: 24, f: 8, alias: "potato" },
+    { id: "bhindi", emoji: "🥒", name: "Bhindi sabzi", serving: "1 katori", kcal: 160, p: 4, c: 12, f: 10, alias: "okra" },
+    { id: "paneer", emoji: "🧀", name: "Paneer sabzi", serving: "1 katori", kcal: 300, p: 14, c: 10, f: 22, alias: "paneer butter masala palak" },
+    { id: "paratha", emoji: "🫓", name: "Aloo paratha", serving: "1 paratha", kcal: 290, p: 6, c: 38, f: 12, alias: "parantha" },
+    { id: "poha", emoji: "🍛", name: "Poha", serving: "1 plate", kcal: 320, p: 7, c: 52, f: 9, alias: "kanda poha" },
+    { id: "upma", emoji: "🍲", name: "Upma", serving: "1 plate", kcal: 310, p: 8, c: 48, f: 8, alias: "rava" },
+    { id: "idli", emoji: "⚪", name: "Idli", serving: "1 idli", kcal: 70, p: 2, c: 14, f: 0, alias: "" },
+    { id: "dosa", emoji: "🥞", name: "Masala dosa", serving: "1 dosa", kcal: 280, p: 6, c: 42, f: 10, alias: "dosai" },
+    { id: "sambar", emoji: "🥣", name: "Sambar", serving: "1 katori", kcal: 110, p: 5, c: 14, f: 3, alias: "" },
+    { id: "khichdi", emoji: "🍲", name: "Khichdi", serving: "1 katori", kcal: 230, p: 8, c: 38, f: 5, alias: "khichri" },
+    { id: "curd", emoji: "🥛", name: "Curd", serving: "1 katori", kcal: 100, p: 6, c: 8, f: 5, alias: "dahi yogurt raita" },
+    { id: "chaas", emoji: "🥛", name: "Chaas", serving: "1 glass", kcal: 60, p: 3, c: 5, f: 3, alias: "buttermilk lassi" },
+    { id: "milk", emoji: "🥛", name: "Milk", serving: "1 glass", kcal: 150, p: 8, c: 12, f: 8, alias: "doodh" },
+    { id: "chai", emoji: "☕", name: "Chai", serving: "1 cup", kcal: 90, p: 2, c: 12, f: 3, alias: "tea" },
+    { id: "coffee", emoji: "☕", name: "Coffee with milk", serving: "1 cup", kcal: 80, p: 3, c: 9, f: 3, alias: "" },
+    { id: "biscuit", emoji: "🍪", name: "Biscuits", serving: "2 biscuits", kcal: 90, p: 1, c: 14, f: 3, alias: "marie parle" },
+    { id: "egg", emoji: "🥚", name: "Boiled egg", serving: "1 egg", kcal: 75, p: 6, c: 1, f: 5, alias: "anda" },
+    { id: "omelette", emoji: "🍳", name: "Omelette", serving: "2 eggs", kcal: 190, p: 13, c: 2, f: 14, alias: "anda bhurji" },
+    { id: "chicken", emoji: "🍗", name: "Chicken curry", serving: "1 katori", kcal: 280, p: 24, c: 8, f: 16, alias: "murgh" },
+    { id: "fish", emoji: "🐟", name: "Fish curry", serving: "1 katori", kcal: 240, p: 22, c: 6, f: 14, alias: "machli" },
+    { id: "biryani", emoji: "🍲", name: "Biryani", serving: "1 plate", kcal: 620, p: 22, c: 80, f: 20, alias: "pulao" },
+    { id: "samosa", emoji: "🥟", name: "Samosa", serving: "1 piece", kcal: 260, p: 5, c: 28, f: 14, alias: "" },
+    { id: "banana", emoji: "🍌", name: "Banana", serving: "1 medium", kcal: 90, p: 1, c: 23, f: 0, alias: "kela" },
+    { id: "apple", emoji: "🍎", name: "Apple", serving: "1 medium", kcal: 80, p: 0, c: 21, f: 0, alias: "seb" },
+    { id: "peanuts", emoji: "🥜", name: "Roasted peanuts", serving: "1 handful", kcal: 160, p: 7, c: 5, f: 13, alias: "moongphali chana" },
+    { id: "sprouts", emoji: "🥗", name: "Sprouts salad", serving: "1 bowl", kcal: 130, p: 9, c: 20, f: 1, alias: "moong" }
+  ];
+  E.foodCombos = [
+    { id: "dal-chawal", label: "Dal chawal", emoji: "🍛", foods: ["dal", "rice"] },
+    { id: "roti-sabzi", label: "2 roti + sabzi", emoji: "🫓", foods: [["roti", 2], "sabzi"] },
+    { id: "poha", label: "Poha", emoji: "🍛", foods: ["poha"] },
+    { id: "chai-biscuit", label: "Chai + biscuit", emoji: "☕", foods: ["chai", "biscuit"] }
+  ];
+  E.searchFoods = function (query) {
+    const q = String(query || "").trim().toLowerCase();
+    if (!q) return E.foodList;
+    const words = q.split(/\s+/);
+    return E.foodList.filter(function (f) {
+      const bits = (f.name + " " + f.alias).toLowerCase().split(/[\s,]+/);
+      return words.every(function (w) {
+        return bits.some(function (b) { return b.indexOf(w) === 0; });
+      });
+    });
+  };
+  E.listScan = function (foods, name, emoji) {
+    const items = foods.map(function (entry) {
+      const id = Array.isArray(entry) ? entry[0] : entry;
+      const qty = Array.isArray(entry) ? entry[1] : 1;
+      const f = E.foodList.find(function (x) { return x.id === id; });
+      return item(f.name, f.serving, f.kcal, f.p, f.c, f.f, qty);
+    });
+    const first = E.foodList.find(function (x) { return x.id === (Array.isArray(foods[0]) ? foods[0][0] : foods[0]); });
+    return {
+      source: "list", name: name || first.name, image: "", emoji: emoji || first.emoji,
+      mealType: E.state.ui.scanMealPreset || E.mealTypeByTime(), saveLater: false, items: items
+    };
   };
   E.entryId = function (user) {
     if (!user) return "welcome";
@@ -276,11 +435,12 @@ window.EatAI = window.EatAI || {};
     return {
       coach: { daily: true, weekly: true, morning: false, time: "20:00" },
       water: { glassMl: 250, target: 8, reminders: true, reminderStart: "08:00", reminderEnd: "22:00", smart: false },
-      streak: { mode: "meals", freeze: true, showChip: true },
+      streak: { mode: "meals", freeze: false, showChip: true },
       units: { weight: "kg", length: "cm", adaptive: true, weighInOn: true, weighInDay: "sun", weighInTime: "08:00" },
       photos: { weekly: true, time: "09:00", day: "sun" },
       reminders: { breakfast: true, lunch: true, dinner: false, bTime: "08:30", lTime: "13:00", dTime: "20:30", custom: [] },
-      privacy: { pausedUntil: null, discovery: true, sameGender: false, distance: "Any", cityVisibility: "full", autoDecline: "Off" }
+      privacy: { pausedUntil: null, discovery: true, sameGender: false, distance: "Any", cityVisibility: "full", autoDecline: "Off" },
+      display: { largeText: false }
     };
   }
   function blankUi() {
@@ -290,12 +450,14 @@ window.EatAI = window.EatAI || {};
       otpPurpose: "verify", loginEmail: "", resetEmail: "", passwordMode: "create",
       currentPassword: "", newPassword: "", pendingFeature: null, pendingGate: null, shareMealId: "",
       busy: null, chatTab: "chats", chatQuery: "", discoverQuery: "",
-      communityTab: "mine", communityQuery: "", diaryOffset: 0, progressWeek: 0, reportSeenWeek: "", photoPose: "front",
+      communityTab: "mine", communityQuery: "", diaryOffset: 0, diaryQuery: "", progressWeek: 0, reportSeenWeek: "", photoPose: "front",
+      streakRange: 7, streakDay: "", photoView: "", photoCompare: "", coachOpen: "",
+      reminderEdit: "", reminderTitle: "", reminderTime: "15:00", shareWeekChat: "",
       weightRange: "1M", weightDraft: 67, scanMode: "photo", torch: false,
       scanMealPreset: null, describeText: "", deleteAck: false, selectedPlan: "yearly",
       shareNote: "", shareChat: null, groupName: "", groupPicks: [], cityQuery: "",
       chatMealChat: "", chatMealPick: "", chatMealText: "", chatMealDraft: null, chatMealLog: true, chatReturn: "",
-      analyzing: false, analyzeTip: 0, scanError: "", scanProgress: "",
+      analyzing: false, analyzeTip: 0, scanError: "", scanProgress: "", foodQuery: "", firstMealCelebrated: false,
       photoHeld: false, photoNote: "", photoNoteOpen: false, photoNoteCount: 0, photoKind: "camera", scanFix: "",
       commName: "", commAbout: "", commCity: "Bengaluru", commView: "feed", openPost: "",
       replyDraft: "", postDraft: "", nearMe: false, offerCode: "", offerError: "", offerOff: 0,
@@ -344,8 +506,11 @@ window.EatAI = window.EatAI || {};
     const s = ["goal", "name", "gender", "birth", "height", "weight"];
     if (skipDiet) s.push("support");
     else s.push("target", "pace");
-    s.push("activity", "exercise", "diet", "training");
-    if (age >= 18) s.push("discovery");
+    s.push("activity", "exercise", "diet");
+    if (ob.mode === "edit") {
+      s.push("training");
+      if (age >= 18) s.push("discovery");
+    }
     s.push("calculating", "reveal");
     return s;
   };
@@ -566,6 +731,7 @@ window.EatAI = window.EatAI || {};
     s.reports = [];
     s.goals = [];
     s.coachHistory = [];
+    s.streakRuns = [];
     s.payments = [];
     s.dayStatus = {};
     s.typing = null;
@@ -627,7 +793,7 @@ window.EatAI = window.EatAI || {};
   function shell() {
     const now = Date.now();
     return {
-      version: 2,
+      version: 3,
       pendingCheckout: null,
       persona: "priya",
       nav: { tab: "home", stack: [{ id: "home", transition: "fade" }] },
@@ -664,9 +830,18 @@ window.EatAI = window.EatAI || {};
       reports: [{ id: "rp1", name: "Unknown profile", reason: "Spam pitch in discover", status: "Pending", date: E.iso(E.addDays(-3)) }],
       goals: [],
       coachHistory: [
-        { date: E.todayIso(), title: "Protein is the missing piece", body: "A shortfall is information, not a failure.", tip: "Add curd or roasted chana with dinner." },
-        { date: E.iso(E.addDays(-1)), title: "Water before the 4pm slump", body: "Two glasses this afternoon kept the snack smaller.", tip: "Pair chai with a glass of water." },
-        { date: E.iso(E.addDays(-2)), title: "Yesterday ran hot", body: "One heavier meal doesn't erase the week.", tip: "Aim for a normal lunch today, not a tiny one." }
+        { id: "ch0", date: E.todayIso(), type: "daily", title: "Protein is the missing piece", body: "A shortfall is information, not a failure.", tip: "Add curd or roasted chana with dinner." },
+        { id: "ch1", date: E.iso(E.addDays(-1)), type: "daily", title: "Water before the 4pm slump", body: "Two glasses this afternoon kept the snack smaller.", tip: "Pair chai with a glass of water." },
+        { id: "ch2", date: E.iso(E.addDays(-2)), type: "daily", title: "Yesterday ran hot", body: "One heavier meal doesn't erase the week.", tip: "Aim for a normal lunch today, not a tiny one." },
+        { id: "ch3", date: E.iso(E.addDays(-7)), type: "weekly", hitDays: 4, title: "Your week in macros", body: "Hit 4 of 7 calorie days. Average protein was close.", tip: "Log dinner before bed." },
+        { id: "ch4", date: E.iso(E.addDays(-14)), type: "weekly", hitDays: 3, title: "A shorter week", body: "Three days landed in range.", tip: "Start with one consistent meal." },
+        { id: "ch5", date: E.iso(E.addDays(-21)), type: "weekly", hitDays: 5, title: "Protein showed up", body: "Five days hit both calories and protein.", tip: "Keep the same lunch." },
+        { id: "ch6", date: E.iso(E.addDays(-28)), type: "weekly", hitDays: 2, title: "A quiet week", body: "Two hit days. The rest were still logged.", tip: "One meal a day is enough to start." }
+      ],
+      streakRuns: [
+        { id: "sr1", length: 12, start: E.iso(E.addDays(-48)), end: E.iso(E.addDays(-36)), reason: "missed_day" },
+        { id: "sr2", length: 8, start: E.iso(E.addDays(-30)), end: E.iso(E.addDays(-22)), reason: "freeze_unavailable" },
+        { id: "sr3", length: 4, start: E.iso(E.addDays(-18)), end: E.iso(E.addDays(-14)), reason: "manual_reset" }
       ],
       typing: null,
       payments: []
@@ -725,6 +900,8 @@ window.EatAI = window.EatAI || {};
         subscription: { status: "active", plan: "yearly", renewsAt: E.iso(E.addDays(286)), endsAt: null, trialUsed: true, provider: "Play Store" },
         ai: true, streak: { current: 18, best: 21, freezes: 1 }, bio: "Push days and big lunches. Accountability only."
       });
+      s.prefs.streak.mode = "goal";
+      s.prefs.streak.freeze = true;
       s.meals = [
         meal({ name: "Egg bhurji & toast", emoji: "🍳", image: E.img.eggs, mealType: "breakfast", date: t, time: "07:30 AM", items: [item("Eggs", "3 eggs", 240, 18, 2, 16), item("Toast", "2 slices", 180, 6, 30, 3)] }),
         meal({ name: "Chicken rice bowl", emoji: "🍗", image: E.img.chicken, mealType: "lunch", date: t, time: "01:00 PM", items: [item("Chicken", "180 g", 300, 46, 0, 10), item("Rice", "1.5 cups", 300, 6, 66, 2), item("Salad", "1 bowl", 70, 2, 8, 3)] }),
@@ -825,7 +1002,7 @@ window.EatAI = window.EatAI || {};
       const raw = localStorage.getItem(KEY);
       if (!raw) return null;
       const data = JSON.parse(raw);
-      if (!data || data.version !== 2 || !data.user) return null;
+      if (!data || data.version !== 3 || !data.user) return null;
       data.modal = null; data.toast = null; data.confirm = null; data.sheet = null;
       if (!data.ui) data.ui = blankUi();
       data.ui.busy = null; data.ui.analyzing = false; data.typing = null;
@@ -950,6 +1127,16 @@ window.EatAI = window.EatAI || {};
     const plan = E.state.user.plan;
     const eaten = E.dayTotals(E.todayIso());
     const gap = plan.p - eaten.p;
+    if (!E.dayMeals(E.todayIso()).length) {
+      const firstEver = !(E.state.meals || []).length;
+      return {
+        title: firstEver ? "Start with one meal" : "Nothing logged yet today",
+        body: firstEver
+          ? "Log whatever you eat next. No need to change your food on day one. We learn from what you actually eat."
+          : "One meal is enough to get today going. Your plan doesn't need you to catch up.",
+        tip: "Snap the plate before you eat. It takes about 5 seconds."
+      };
+    }
     if (gap > 8) {
       return {
         title: "Protein is the missing piece",

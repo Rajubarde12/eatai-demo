@@ -71,6 +71,15 @@
         '<button type="button" class="row-btn" data-action="report-msg">Report</button>' +
         '<button type="button" class="row-btn danger" data-action="block-chat">Block</button></div></div>';
     }
+    if (E.state.sheet && E.state.sheet.kind === "chat") {
+      const sc = (E.state.chats || []).find(function (c) { return c.id === E.state.sheet.chatId; });
+      const nm = sc ? String(sc.name).split(" ")[0] : "them";
+      html += '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-sheet" aria-label="Close"></button><div class="sheet action-sheet"><div class="grabber"></div>' +
+        '<p class="caption center" style="padding:0 12px 8px">' + E.esc(nm) + " won't be told if you report or block.</p>" +
+        '<button type="button" class="row-btn" data-action="report-chat" data-testid="chat-report">Report ' + E.esc(nm) + "</button>" +
+        (sc && sc.blocked ? "" : '<button type="button" class="row-btn danger" data-action="block-chat" data-testid="chat-block">Block ' + E.esc(nm) + "</button>") +
+        '<button type="button" class="row-btn" data-action="close-sheet">Cancel</button></div></div>';
+    }
     if (E.state.confirm) {
       const c = E.state.confirm;
       html += '<div class="dialog-wrap"><button type="button" class="backdrop" data-action="close-confirm"></button><div class="dialog"><div class="heading">' + E.esc(c.title) + '</div><p class="body muted mt8">' + E.esc(c.message) + '</p><div class="grid2 mt16">' +
@@ -84,6 +93,7 @@
   E.render = function (opts) {
     opts = opts || {};
     clearTimers();
+    E.syncStreak();
     const prevScroll = document.querySelector("#stage .scroll");
     const top = prevScroll ? prevScroll.scrollTop : 0;
     const focus = document.activeElement;
@@ -105,6 +115,7 @@
     $("tabbar").innerHTML = roots[screen.id] ? tabbar() : "";
     $("overlay").innerHTML = overlay();
     $("viewport").dataset.theme = (screen.id === "scan" || (E.state.modal && E.state.modal.id === "paywall")) ? "dark" : "light";
+    $("viewport").dataset.text = E.state.prefs.display && E.state.prefs.display.largeText ? "large" : "normal";
     if (window.lucide) {
       try { window.lucide.createIcons({ icons: window.lucide.icons }); } catch (err) { /* icon set optional */ }
     }
@@ -178,7 +189,7 @@
         }, 2000);
       }
     }
-    if (screen.id === "scan" && E.state.ui.scanMode === "barcode" && !E.state.ui.analyzing && E.isPro() && !E.state.flags.scanLimit) {
+    if (screen.id === "scan" && E.state.ui.scanMode === "barcode" && !E.state.ui.analyzing && !lockedScan("barcode")) {
       E._bar = setTimeout(function () {
         if (E.current().id === "scan" && E.state.ui.scanMode === "barcode") actions.shutter();
       }, 1700);
@@ -240,11 +251,11 @@
       });
       E._wt = new window.Chart(wt, {
         type: "line",
-        data: { labels: logs.map(function (l) { return l.date.slice(5); }), datasets: [
+        data: { labels: logs.map(function (l) { return E.parseIso(l.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" }).replace("Sept", "Sep"); }), datasets: [
           { data: logs.map(function (l) { return l.kg; }), showLine: false, pointRadius: 3, pointBackgroundColor: "#121210" },
           { data: trendLine, borderColor: "#8FB516", backgroundColor: "rgba(198,241,53,.35)", fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 }
         ] },
-        options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 5 } }, y: { ticks: { font: { size: 10 } } } } }
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 4, maxRotation: 0 } }, y: { ticks: { font: { size: 10 }, maxTicksLimit: 5, callback: function (v) { return Number(v).toFixed(1); } } } } }
       });
     }
   }
@@ -305,13 +316,14 @@
     E.render({ animate: false, keepScroll: true });
   }
   function lockedScan() { return !E.isPro() || !!E.state.flags.scanLimit; }
+  E.lockedScan = lockedScan;
   function resumeGate() {
     const kind = E.state.ui.pendingGate;
     if (!kind) return;
     const scanKind = kind === "shutter" || kind === "describe" || kind === "barcode";
-    if (scanKind && lockedScan()) return;
+    if (scanKind && lockedScan(kind)) return;
     if (!scanKind && !E.isPro()) return;
-    if ((kind === "shutter" || kind === "describe" || kind === "chat-meal-type") && !E.state.user.ai) {
+    if ((kind === "shutter" || kind === "describe" || kind === "chat-meal-type" || kind === "ai-read") && !E.state.user.ai) {
       openModal("ai-consent");
       return;
     }
@@ -328,6 +340,22 @@
     }
     else if (kind === "photo") actions["add-photo"]();
     else if (kind === "report") openModal("weekly-report");
+    else if (kind === "share-card") openModal("share-card");
+    else if (kind === "ai-read") openModal("ai-read");
+    else if (kind === "streak-goal") {
+      E.state.prefs.streak.mode = "goal";
+      toast("Hit-goal streak is on");
+      E.render({ animate: false, keepScroll: true });
+    }
+    else if (kind === "streak-freeze") {
+      E.state.prefs.streak.freeze = true;
+      toast("One missed day this month can stay");
+      E.render({ animate: false, keepScroll: true });
+    }
+    else if (kind === "streak-runs") {
+      E.state.modal = null;
+      E.render({ animate: false, keepScroll: true });
+    }
     else if (kind === "discover") { E.state.ui.chatTab = "discover"; E.render({ animate: false, keepScroll: true }); }
     else if (kind === "save") { if (E.state.scan) { E.state.scan.saveLater = true; E.render({ animate: false, keepScroll: true }); } }
     else if (kind === "measure") actions["save-measure"]();
@@ -447,7 +475,15 @@
     else if (key === "offer-code") { ui.offerCode = val; ui.offerError = ""; }
     else if (key === "reply-draft") ui.replyDraft = val;
     else if (key === "post-draft") ui.postDraft = val;
+    else if (key === "weight-draft") ui.weightDraft = val.replace(",", ".");
     else if (key === "custom-title") ui.customTitle = val;
+    else if (key === "diary-q") ui.diaryQuery = val;
+    else if (key === "food-q") ui.foodQuery = val;
+    else if (key === "ob-year-input") {
+      const y = Number(val);
+      if (String(val).length === 4 && y >= 1940 && y <= 2015) ob.year = y;
+    }
+    else if (key === "reminder-title") ui.reminderTitle = val;
     else if (key === "new-comm") ui.newComm = val;
     else if (key === "new-about") ui.newAbout = val;
     else if (key === "new-city") ui.newCity = val;
@@ -457,7 +493,7 @@
     else if (key === "mw") ui.measureWaist = val;
     else if (key === "mh") ui.measureHips = val;
     else if (key === "mc") ui.measureChest = val;
-    const live = { email: 1, password: 1, currentPassword: 1, newPassword: 1, "ob-name": 1, "chat-q": 1, "disc-q": 1, "comm-q": 1, bio: 1, "city-q": 1, "group-name": 1, "delete-ack": 1, "new-comm": 1 };
+    const live = { email: 1, password: 1, currentPassword: 1, newPassword: 1, "ob-name": 1, "chat-q": 1, "disc-q": 1, "comm-q": 1, bio: 1, "city-q": 1, "group-name": 1, "delete-ack": 1, "new-comm": 1, "diary-q": 1, "food-q": 1 };
     if (live[key]) E.render({ animate: false, keepScroll: true });
   }
 
@@ -489,7 +525,30 @@
     const entry = { id: E.uid("m"), name: scan.name || "Meal", emoji: scan.emoji || "🍽️", image: scan.image, items: scan.items, mealType: scan.mealType || E.mealTypeByTime(), date: E.todayIso(), time: E.clock() };
     E.state.meals.push(entry);
     if (scan.saveLater) E.state.saved.unshift(JSON.parse(JSON.stringify(entry)));
+    afterLog();
     return entry;
+  }
+  function afterLog() {
+    const bumped = E.bumpStreak();
+    if (E.state.meals.length === 1 && !E.state.ui.firstMealCelebrated) {
+      E.state.ui.firstMealCelebrated = true;
+      E.state.ui.celebrate = true;
+    } else if (bumped && E.state.user.streak.current > 1) {
+      E.state.ui.streakToast = "🔥 " + E.state.user.streak.current + " days in a row";
+    }
+  }
+  function showCelebration() {
+    if (E.state.ui.celebrate) {
+      E.state.ui.celebrate = false;
+      E.state.modal = { id: "first-meal" };
+      return true;
+    }
+    if (E.state.ui.streakToast) {
+      const msg = E.state.ui.streakToast;
+      E.state.ui.streakToast = "";
+      setTimeout(function () { toast(msg); }, 2700);
+    }
+    return false;
   }
   function leaveScan() {
     const stack = E.state.nav.stack;
@@ -519,7 +578,7 @@
   async function runScan(builder) {
     const mode = E.state.ui.scanMode || "photo";
     const kind = mode === "describe" ? "describe" : mode === "barcode" ? "barcode" : "shutter";
-    if (lockedScan()) { E.state.ui.pendingGate = kind; openModal("paywall"); return; }
+    if (lockedScan(kind)) { E.state.ui.pendingGate = kind; openModal("paywall"); return; }
     if (kind !== "barcode" && !E.state.user.ai) { E.state.ui.pendingGate = kind; openModal("ai-consent"); return; }
     lastScan = builder;
     E.state.ui.scanError = "";
@@ -571,7 +630,7 @@
   }
   function startPhotoHold(kind) {
     E.state.ui.photoKind = kind || "camera";
-    if (lockedScan()) { E.state.ui.pendingGate = "shutter"; openModal("paywall"); return; }
+    if (lockedScan("shutter")) { E.state.ui.pendingGate = "shutter"; openModal("paywall"); return; }
     if (!E.state.user.ai) { E.state.ui.pendingGate = "shutter"; openModal("ai-consent"); return; }
     beginPhotoHold(kind);
   }
@@ -925,6 +984,13 @@
       if (field) ob[field] = el.dataset.value;
       if (field === "gender" && ob.gender !== "female") ob.pregnancy = null;
       E.render({ animate: false, keepScroll: true });
+      const auto = field && !(field === "gender" && ob.gender === "female");
+      if (!auto) return;
+      clearTimeout(E._obAuto);
+      const at = ob.i;
+      E._obAuto = setTimeout(function () {
+        if (E.current().id === "onboarding" && E.state.onboarding === ob && ob.i === at) actions["ob-next"]();
+      }, 260);
     },
     "ob-preg": function (el) {
       E.state.onboarding.pregnancy = el.dataset.value || null;
@@ -983,6 +1049,12 @@
       const step = steps[ob.i];
       if (step === "reveal") { finishOnboarding(); return; }
       if (step !== "calculating" && !E.stepValid(ob)) return;
+      const yearBox = step === "birth" && document.getElementById("ob-year-input");
+      if (yearBox) {
+        const y = Number(yearBox.value);
+        if (!(y >= 1940 && y <= 2015)) { toast("Enter a year between 1940 and 2015", "err"); return; }
+        ob.year = y;
+      }
       ob.i += 1;
       if (ob.i >= E.onboardingSteps(ob).length) ob.i = E.onboardingSteps(ob).length - 1;
       E.render({ animate: true, transition: "right" });
@@ -997,8 +1069,10 @@
       push("onboarding", {}, "up");
     },
     "open-scan": function (el) {
-      E.state.ui.chatReturn = "";
-      E.state.ui.scanMode = "photo";
+      const ui = E.state.ui;
+      ui.chatReturn = "";
+      ui.scanMode = el && el.dataset.mode ? el.dataset.mode : (E.isPro() || E.trialOpen()) && !ui.aiDeclined ? "photo" : "search";
+      ui.foodQuery = "";
       E.state.ui.scanMealPreset = el && el.dataset.meal ? el.dataset.meal : null;
       E.state.ui.analyzing = false;
       E.state.ui.photoHeld = false;
@@ -1022,7 +1096,7 @@
       if (E.state.flags.cameraDenied && E.state.ui.scanMode === "photo") return;
       const mode = E.state.ui.scanMode;
       if (mode === "barcode") {
-        if (lockedScan()) { E.state.ui.pendingGate = "barcode"; openModal("paywall"); return; }
+        if (lockedScan("barcode")) { E.state.ui.pendingGate = "barcode"; openModal("paywall"); return; }
         runScan(function () { return E.scanPreset("barcode"); });
         return;
       }
@@ -1072,6 +1146,38 @@
       toast("Estimate updated");
       E.render({ animate: false, keepScroll: true });
     },
+    "food-pick": function (el) {
+      const food = E.foodList.find(function (f) { return f.id === el.dataset.id; });
+      if (!food) return;
+      E.state.modal = null;
+      E.state.scan = E.listScan([food.id]);
+      push("scan-result", {}, "up");
+    },
+    "combo-pick": function (el) {
+      const combo = E.foodCombos.find(function (c) { return c.id === el.dataset.id; });
+      if (!combo) return;
+      E.state.ui.scanMealPreset = null;
+      E.state.scan = E.listScan(combo.foods, combo.label, combo.emoji);
+      push("scan-result", {}, "up");
+    },
+    "use-food-list": function () {
+      E.state.modal = null;
+      E.state.ui.pendingGate = null;
+      E.state.ui.scanMode = "search";
+      E.state.ui.photoHeld = false;
+      if (!E.current() || E.current().id !== "scan") { push("scan", {}, "up"); return; }
+      E.render({ animate: false, keepScroll: true });
+    },
+    "close-celebrate": function () {
+      E.state.modal = null;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "toggle-large-text": function () {
+      const d = E.state.prefs.display || (E.state.prefs.display = { largeText: false });
+      d.largeText = !d.largeText;
+      toast(d.largeText ? "Bigger text is on" : "Text size is back to normal");
+      E.render({ animate: false, keepScroll: true });
+    },
     "describe-chip": function (el) {
       E.state.ui.describeText = el.dataset.value;
       E.render({ animate: false, keepScroll: true });
@@ -1079,7 +1185,7 @@
     "describe-submit": function () {
       const text = (E.state.ui.describeText || "").trim();
       if (!text) { toast("Describe what you ate", "err"); return; }
-      if (lockedScan()) { E.state.ui.pendingGate = "describe"; openModal("paywall"); return; }
+      if (lockedScan("describe")) { E.state.ui.pendingGate = "describe"; openModal("paywall"); return; }
       if (!E.state.user.ai) { E.state.ui.pendingGate = "describe"; openModal("ai-consent"); return; }
       runScan(function () { return E.mealFromText(text); });
     },
@@ -1124,12 +1230,13 @@
         if (chat) postMealToChat(chat, entry, "");
         leaveScan();
         E.state.ui.focusComposer = !!chat;
+        E.state.ui.celebrate = false;
         toast(chat ? "Sent to " + firstName(chat.name) + ". Also in your diary." : "Added to your diary");
         E.render({ animate: true, transition: "fade" });
         return;
       }
       E.state.nav = { tab: "diary", stack: [{ id: "diary" }] };
-      toast("Added to your diary");
+      if (!showCelebration()) toast("Added to your diary");
       E.render({ animate: true, transition: "fade" });
     },
     "log-only": function () {
@@ -1139,7 +1246,7 @@
       E.state.scan = null;
       E.state.ui.chatReturn = "";
       leaveScan();
-      toast("Added to your diary");
+      if (!showCelebration()) toast("Added to your diary");
       E.render({ animate: true, transition: "fade" });
     },
     "discard-scan": function () {
@@ -1152,6 +1259,31 @@
       E.render({ animate: true, transition: "fade" });
     },
     "open-meal": function (el) { push("food", { id: el.dataset.id }, "right"); },
+    "edit-meal": function (el) {
+      const meal = (E.state.meals || []).find(function (m) { return m.id === el.dataset.id; });
+      if (!meal) return;
+      E.state.scan = JSON.parse(JSON.stringify(meal));
+      E.state.scan.editId = meal.id;
+      E.state.scan.source = "edit";
+      push("scan-result", {}, "up");
+    },
+    "cancel-edit": function () {
+      E.state.scan = null;
+      pop();
+    },
+    "save-edit": function () {
+      const scan = E.state.scan;
+      const meal = scan && (E.state.meals || []).find(function (m) { return m.id === scan.editId; });
+      if (!meal) { E.state.scan = null; pop(); return; }
+      if (!scan.items.length) { toast("Keep at least one food, or delete the meal", "err"); return; }
+      meal.name = scan.name || meal.name;
+      meal.items = scan.items;
+      meal.mealType = scan.mealType || meal.mealType;
+      if (scan.saveLater && !(E.state.saved || []).some(function (s) { return s.name === meal.name; })) E.state.saved.unshift(JSON.parse(JSON.stringify(meal)));
+      E.state.scan = null;
+      toast("Meal updated · " + E.num(E.mealTotals(meal).kcal) + " kcal");
+      pop();
+    },
     "delete-meal": function (el) {
       const id = el.dataset.id || (E.currentParams() || {}).id;
       ask({ title: "Remove this meal?", message: "It leaves today's totals. You can log it again later.", ok: "Remove", danger: true, action: "do-delete-meal", id: id });
@@ -1162,6 +1294,40 @@
       toast("Meal removed");
       E.render({ animate: true, transition: "fade" });
     },
+    "log-again": function (el) {
+      const src = (E.state.meals || []).find(function (m) { return m.id === el.dataset.id; });
+      if (!src) return;
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = E.uid("m");
+      copy.date = E.todayIso();
+      copy.time = E.clock();
+      E.state.meals.push(copy);
+      afterLog();
+      if (!showCelebration()) toast(copy.name + " logged today");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "star-meal": function (el) {
+      const src = (E.state.meals || []).find(function (m) { return m.id === el.dataset.id; });
+      if (!src) return;
+      const name = String(src.name || "").toLowerCase();
+      const existing = (E.state.saved || []).find(function (s) { return String(s.name || "").toLowerCase() === name; });
+      if (existing) {
+        E.state.saved = E.state.saved.filter(function (s) { return s.id !== existing.id; });
+        toast("Removed from Eat it again");
+        E.render({ animate: false, keepScroll: true });
+        return;
+      }
+      if (!E.isPro() && (E.state.saved || []).length >= 10) {
+        E.state.ui.pendingGate = "save";
+        openModal("paywall");
+        return;
+      }
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = E.uid("m");
+      E.state.saved.unshift(copy);
+      toast("Starred for Eat it again");
+      E.render({ animate: false, keepScroll: true });
+    },
     "quick-add": function (el) {
       const src = (E.state.saved || []).find(function (s) { return s.id === el.dataset.id; });
       if (!src) return;
@@ -1171,7 +1337,8 @@
       copy.time = E.clock();
       copy.mealType = E.state.ui.scanMealPreset || E.mealTypeByTime();
       E.state.meals.push(copy);
-      toast(copy.name + " added to today");
+      afterLog();
+      if (!showCelebration()) toast(copy.name + " added to today");
       E.render({ animate: false, keepScroll: true });
     },
     "delete-saved": function (el) {
@@ -1217,6 +1384,62 @@
       E.render({ animate: false, keepScroll: true });
     },
     "open-report": function () { openModal("weekly-report"); },
+    "open-share-card": function () {
+      if (!E.isPro()) {
+        E.state.ui.pendingGate = "share-card";
+        openModal("paywall");
+        return;
+      }
+      E.state.ui.shareWeekChat = "";
+      openModal("share-card");
+    },
+    "pick-week-chat": function (el) {
+      E.state.ui.shareWeekChat = el.dataset.id;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "send-week-card": function () {
+      const chat = chatById(E.state.ui.shareWeekChat);
+      if (!chat) return;
+      if (!E.isPro()) {
+        E.state.ui.pendingGate = "share-card";
+        openModal("paywall");
+        return;
+      }
+      const days = E.weekDays(0);
+      const week = E.macroWeek(days);
+      const text = "Week " + E.shortDate(days[0].iso) + "–" + E.shortDate(days[6].iso) + ": hit " + week.hitDays + " of 7. Protein " + week.avgProtein + "g. " + week.focus;
+      chat.messages.push({ id: E.uid("x"), from: "me", text: text, at: Date.now(), status: "read" });
+      chat.preview = "Shared this week";
+      chat.time = Date.now();
+      E.state.modal = null;
+      E.state.ui.focusComposer = true;
+      E.state.nav.tab = "chat";
+      E.state.nav.stack.push({ id: "thread", params: { id: chat.id } });
+      toast("Sent to " + firstName(chat.name));
+      E.render({ animate: true, transition: "right" });
+    },
+    "streak-day": function (el) {
+      E.state.ui.streakDay = el.dataset.iso;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "streak-range": function (el) {
+      E.state.ui.streakRange = Number(el.dataset.value) || 14;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "streak-freeze": function () {
+      if (!E.isPro()) {
+        E.state.ui.pendingGate = "streak-freeze";
+        openModal("paywall");
+        return;
+      }
+      E.state.prefs.streak.freeze = !E.state.prefs.streak.freeze;
+      toast(E.state.prefs.streak.freeze ? "One missed day this month can stay" : "Monthly freeze is off");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "streak-runs-pro": function () {
+      E.state.ui.pendingGate = "streak-runs";
+      openModal("paywall");
+    },
     "open-report-pro": function () {
       E.state.ui.pendingGate = "report";
       openModal("paywall");
@@ -1245,7 +1468,8 @@
       openModal("log-weight");
     },
     "weight-step": function (el) {
-      const next = Math.round((Number(E.state.ui.weightDraft) + Number(el.dataset.dir) * 0.1) * 10) / 10;
+      const cur = Number(E.state.ui.weightDraft) || E.state.user.weightKg || 70;
+      const next = Math.round((cur + Number(el.dataset.dir) * 0.1) * 10) / 10;
       E.state.ui.weightDraft = Math.min(220, Math.max(35, next));
       E.render({ animate: false, keepScroll: true });
     },
@@ -1276,7 +1500,8 @@
     noop: function () {},
     send: function () {
       const chat = chatById(E.currentParams().id);
-      const text = (E.state.ui.composer || "").trim();
+      const box = document.getElementById("composer");
+      const text = ((box && box.value) || E.state.ui.composer || "").trim();
       if (!chat || !text) return;
       chat.messages.push({ id: E.uid("x"), from: "me", text: text, at: Date.now(), status: "read" });
       chat.preview = text; chat.time = Date.now(); chat.unread = 0;
@@ -1432,13 +1657,37 @@
       toast("Report filed");
       E.render({ animate: false, keepScroll: true });
     },
+    "chat-more": function () {
+      E.state.sheet = { kind: "chat", chatId: E.currentParams().id };
+      E.render({ animate: false, keepScroll: true });
+    },
+    "report-chat": function () {
+      const chat = chatById(E.state.sheet.chatId);
+      E.state.reports.unshift({ id: E.uid("rp"), name: chat ? chat.name : "Chat", reason: "Reported from a conversation", status: "Pending", date: E.todayIso() });
+      E.state.sheet = null;
+      toast("Report filed. See it in Privacy & Safety → My reports.");
+      E.render({ animate: false, keepScroll: true });
+    },
     "block-chat": function () {
       const chat = chatById(E.state.sheet.chatId);
-      if (chat) {
+      E.state.sheet = null;
+      if (!chat) { E.render({ animate: false, keepScroll: true }); return; }
+      ask({ title: "Block " + chat.name + "?", message: "They can't message you or find you in Discover. They won't be told. You can unblock in Privacy & Safety.", ok: "Block", danger: true, action: "do-block-chat", id: chat.id });
+    },
+    "unblock-chat": function () {
+      const chat = chatById(E.currentParams().id);
+      if (!chat) return;
+      chat.blocked = false;
+      E.state.blocked = (E.state.blocked || []).filter(function (b) { return b.name !== chat.name; });
+      toast("Unblocked " + firstName(chat.name));
+      E.render({ animate: false, keepScroll: true });
+    },
+    "do-block-chat": function (c) {
+      const chat = chatById(c.id);
+      if (chat && !chat.blocked) {
         chat.blocked = true;
         E.state.blocked.push({ id: E.uid("b"), name: chat.name, color: chat.color, initials: chat.initials });
       }
-      E.state.sheet = null;
       toast("Blocked " + (chat ? chat.name : "user"));
       E.render({ animate: false, keepScroll: true });
     },
@@ -1626,6 +1875,20 @@
     "leave-community": function (el) {
       const c = E.communityById(el.dataset.cid);
       if (!c) return;
+      ask({ title: "Leave " + c.name + "?", message: "You'll stop seeing posts. Your old posts stay. You can join again from Discover.", ok: "Leave", danger: true, action: "do-leave-community", cid: c.id });
+    },
+    "report-post": function (el) {
+      const c = E.communityById(el.dataset.cid);
+      const post = c && (c.posts || []).find(function (p) { return p.id === el.dataset.id; });
+      if (!post) return;
+      post.hidden = true;
+      E.state.reports.unshift({ id: E.uid("rp"), name: post.author + " · " + c.name, reason: "Reported post", status: "Pending", date: E.todayIso() });
+      toast("Post reported and hidden for you");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "do-leave-community": function (cfn) {
+      const c = E.communityById(cfn.cid);
+      if (!c) return;
       c.joined = false;
       c.members = Math.max(1, c.members - 1);
       c.memberList = (c.memberList || []).filter(function (m) { return m.id !== "me"; });
@@ -1787,14 +2050,20 @@
       else ask({ title: "You're on Pro", message: label + " plan is active via " + (razor ? "Razorpay" : "the store") + ". You were not charged.", ok: "Nice", hideCancel: true, action: "noop-render" });
     },
     trial: function () {
+      if (E.state.user.isGuest) {
+        askEmailFor({ type: "paywall" });
+        return;
+      }
       const sub = E.state.user.subscription;
+      const plan = E.state.ui.selectedPlan || "yearly";
       sub.status = "trial";
-      sub.plan = "yearly";
+      sub.plan = plan === "sixmonth" ? "half" : plan;
+      sub.provider = "App Store";
       sub.trialUsed = true;
-      sub.endsAt = E.iso(E.addDays(3));
-      sub.renewsAt = null;
+      sub.endsAt = null;
+      sub.renewsAt = E.iso(E.addDays(3));
       E.state.modal = null;
-      toast("3-day Pro trial started");
+      toast("3-day free trial on. Autopay ₹" + E.num(E.planPrices[plan]) + " on " + E.niceDate(sub.renewsAt) + " unless you cancel.");
       if (E.state.ui.pendingGate) resumeGate();
       else E.render({ animate: false, keepScroll: true });
     },
@@ -1809,14 +2078,19 @@
       E.render({ animate: false, keepScroll: true });
     },
     "ask-cancel": function () {
-      ask({ title: "Cancel subscription?", message: "You'll keep Pro until the end of this period. In this demo that's 30 days.", ok: "Cancel plan", danger: true, action: "do-cancel" });
+      const sub = E.state.user.subscription;
+      const msg = sub.status === "trial"
+        ? "You won't be charged. Pro stays on until " + E.niceDate(sub.renewsAt) + ", then you go back to Free. Your meals stay."
+        : "You'll keep Pro until the end of this period. In this demo that's 30 days.";
+      ask({ title: sub.status === "trial" ? "Cancel free trial?" : "Cancel subscription?", message: msg, ok: sub.status === "trial" ? "Cancel trial" : "Cancel plan", danger: true, action: "do-cancel" });
     },
     "do-cancel": function () {
       const sub = E.state.user.subscription;
+      const trial = sub.status === "trial";
       sub.status = "cancelled";
+      sub.endsAt = trial ? sub.renewsAt : E.iso(E.addDays(30));
       sub.renewsAt = null;
-      sub.endsAt = E.iso(E.addDays(30));
-      toast(sub.provider === "Razorpay" ? "Auto-renew cancelled. Pro stays until the end date." : "Cancel in the store. Pro stays until the end date.");
+      toast(trial ? "Trial cancelled. No charge. Pro stays until " + E.niceDate(sub.endsAt) + "." : sub.provider === "Razorpay" ? "Auto-renew cancelled. Pro stays until the end date." : "Cancel in the store. Pro stays until the end date.");
       E.render({ animate: false, keepScroll: true });
     },
     "resume-sub": function () {
@@ -1858,14 +2132,23 @@
     },
     "ai-allow": function () {
       E.state.user.ai = true;
+      E.state.ui.aiDeclined = false;
       E.state.modal = null;
       if (E.state.ui.pendingGate) resumeGate();
       else { toast("AI Processing enabled"); E.render({ animate: false, keepScroll: true }); }
     },
     "ai-not-now": function () {
+      const gate = E.state.ui.pendingGate;
       E.state.ui.pendingGate = null;
       E.state.modal = null;
-      toast("AI Processing was not enabled", "err");
+      if ((gate === "shutter" || gate === "describe") && E.current() && E.current().id === "scan") {
+        E.state.ui.aiDeclined = true;
+        E.state.ui.scanMode = "search";
+        E.state.ui.photoHeld = false;
+        toast("No problem. Pick from the food list, no AI needed.");
+      } else {
+        toast("AI Processing stays off. You can turn it on in Profile.");
+      }
       E.render({ animate: false, keepScroll: true });
     },
     toggle: function (el) {
@@ -1894,7 +2177,94 @@
       if (row) row.on = !row.on;
       E.render({ animate: false, keepScroll: true });
     },
-    "streak-mode": function (el) { E.state.prefs.streak.mode = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "edit-reminder": function (el) {
+      const row = (E.state.prefs.reminders.custom || []).find(function (r) { return r.id === el.dataset.id; });
+      if (!row) return;
+      E.state.ui.reminderEdit = row.id;
+      E.state.ui.reminderTitle = row.title;
+      E.state.ui.reminderTime = row.time;
+      openModal("edit-reminder");
+    },
+    "reminder-time": function (el) {
+      E.state.ui.reminderTime = el.dataset.value;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "save-reminder": function () {
+      const row = (E.state.prefs.reminders.custom || []).find(function (r) { return r.id === E.state.ui.reminderEdit; });
+      const title = (E.state.ui.reminderTitle || "").trim();
+      if (!row || !title) { toast("Name the reminder", "err"); return; }
+      row.title = title;
+      row.time = E.state.ui.reminderTime || row.time;
+      E.state.modal = null;
+      toast("Reminder updated");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "ask-delete-reminder": function (el) {
+      const id = (el && el.dataset && el.dataset.id) || E.state.ui.reminderEdit;
+      ask({ title: "Delete this reminder?", message: "It will stop on this device.", ok: "Delete", danger: true, action: "do-delete-reminder", id: id });
+    },
+    "do-delete-reminder": function (c) {
+      E.state.prefs.reminders.custom = (E.state.prefs.reminders.custom || []).filter(function (r) { return r.id !== c.id; });
+      E.state.modal = null;
+      toast("Reminder deleted");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "open-coach": function (el) {
+      E.state.ui.coachOpen = el.dataset.id;
+      openModal("coach-note");
+    },
+    "ask-delete-coach": function (el) {
+      ask({ title: "Delete this note?", message: "It leaves coach history. Today's Home note can still appear.", ok: "Delete", danger: true, action: "do-delete-coach", id: el.dataset.id || E.state.ui.coachOpen });
+    },
+    "do-delete-coach": function (c) {
+      E.state.coachHistory = (E.state.coachHistory || []).filter(function (n) { return n.id !== c.id; });
+      if (E.state.modal && E.state.modal.id === "coach-note") E.state.modal = null;
+      toast("Note deleted");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "ask-clear-coach": function () {
+      ask({ title: "Clear coach history?", message: "Daily and weekly notes on this device go away. Home can still show today's note.", ok: "Clear", danger: true, action: "do-clear-coach" });
+    },
+    "do-clear-coach": function () {
+      E.state.coachHistory = [];
+      E.state.modal = null;
+      toast("Coach history cleared");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "open-photo": function (el) {
+      E.state.ui.photoView = el.dataset.id;
+      E.state.ui.photoCompare = "";
+      openModal("photo-view");
+    },
+    "photo-compare": function (el) {
+      E.state.ui.photoCompare = el.dataset.id;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "ai-read": function (el) {
+      E.state.ui.photoA = el.dataset.a || "";
+      E.state.ui.photoB = el.dataset.b || "";
+      if (!E.isPro()) {
+        E.state.ui.pendingGate = "ai-read";
+        openModal("paywall");
+        return;
+      }
+      if (!E.state.user.ai) {
+        E.state.ui.pendingGate = "ai-read";
+        openModal("ai-consent");
+        return;
+      }
+      openModal("ai-read");
+    },
+    "streak-mode": function (el) {
+      if (el.dataset.value === "goal" && !E.isPro()) {
+        E.state.ui.pendingGate = "streak-goal";
+        openModal("paywall");
+        return;
+      }
+      E.state.prefs.streak.mode = el.dataset.value === "goal" ? "goal" : "meals";
+      toast(E.state.prefs.streak.mode === "goal" ? "Hit-goal streak is on" : "Any logged meal counts");
+      E.render({ animate: false, keepScroll: true });
+    },
     "unit-weight": function (el) { E.state.prefs.units.weight = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
     "unit-length": function (el) { E.state.prefs.units.length = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
     weighin: function (el) { E.state.prefs.units.weighIn = el.dataset.value === "Evening" ? "evening" : "morning"; E.render({ animate: false, keepScroll: true }); },
@@ -2069,11 +2439,14 @@
   };
 
   function commitWeight(replace) {
-    const kg = Number(E.state.ui.weightDraft);
+    const kg = Math.round(Number(E.state.ui.weightDraft) * 10) / 10;
+    if (!(kg >= 35 && kg <= 220)) { toast("Enter a weight between 35 and 220 kg", "err"); return; }
+    E.state.ui.weightDraft = kg;
     const today = E.todayIso();
     const existing = (E.state.weightLog || []).find(function (w) { return w.date === today; });
+    const prev = (E.state.weightLog || []).filter(function (w) { return w.date < today; }).pop();
     if (existing && !replace) {
-      ask({ title: "Replace today's weigh-in?", message: "You already logged " + existing.kg + " kg today.", ok: "Replace", action: "save-weight-replace" });
+      ask({ title: "Replace today's weigh-in?", message: "Today says " + existing.kg + " kg. Change it to " + kg.toFixed(1) + " kg?", ok: "Replace", action: "save-weight-replace" });
       return;
     }
     if (existing) existing.kg = kg;
@@ -2081,7 +2454,10 @@
     E.state.weightLog.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
     E.state.user.weightKg = kg;
     E.state.modal = null;
-    toast("Weigh-in saved");
+    const diff = prev ? Math.round((kg - prev.kg) * 10) / 10 : 0;
+    const target = E.state.user.targetKg;
+    const left = target && E.state.user.goal !== "health" && !E.protectedMode(E.state.user) ? Math.round(Math.abs(kg - target) * 10) / 10 : 0;
+    toast("Saved " + kg.toFixed(1) + " kg" + (prev ? " · " + (diff === 0 ? "same as last time" : (diff > 0 ? "▲ " : "▼ ") + Math.abs(diff) + " kg since last") : "") + (left ? " · " + left + " kg to goal" : ""));
     E.render({ animate: false, keepScroll: true });
   }
 
@@ -2146,8 +2522,7 @@
     if (t.dataset && t.dataset.model) applyModel(t);
   });
   document.addEventListener("change", function (e) {
-    if (e.target && e.target.dataset && e.target.dataset.model === "delete-ack") applyModel(e.target);
-  });
+    if (e.target && e.target.dataset && e.target.dataset.model === "delete-ack") applyModel(e.target);  });
   document.addEventListener("paste", function (e) {
     const t = e.target;
     if (!t.dataset || t.dataset.otp == null) return;
@@ -2160,6 +2535,8 @@
   document.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && e.target.id === "composer") { e.preventDefault(); actions.send(); }
     if (e.key === "Enter" && e.target.id === "photo-note") { e.preventDefault(); actions["estimate-photo"](); }
+    if (e.key === "Enter" && (e.target.id === "ob-year-input" || e.target.id === "ob-name")) { e.preventDefault(); actions["ob-next"](); }
+    if (e.key === "Enter" && e.target.id === "weight-input") { e.preventDefault(); commitWeight(false); }
     if (e.key === "Enter" && e.target.dataset && e.target.dataset.model === "password") {
       e.preventDefault();
       if (E.current() && E.current().id === "register") actions.register();

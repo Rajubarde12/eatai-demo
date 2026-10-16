@@ -41,7 +41,7 @@
           E.avatar({ name: c.name, initials: c.initials, color: c.color, size: 48 }) +
           '<span class="grow"><span class="' + (c.unread ? "unread-name" : "heading") + '" style="font-size:15px">' + E.esc(c.name) + '</span><span class="caption" style="display:block">' + E.esc(c.preview) + "</span></span>" +
           '<span class="col" style="align-items:flex-end"><span class="caption">' + E.relTime(c.time) + "</span>" +
-          (c.unread ? '<em class="badge" style="position:static;margin-top:6px">' + c.unread + "</em>" : '<span class="ticks">' + E.icon("check-check") + "</span>") +
+          (c.unread ? '<em class="badge" style="position:static;margin-top:6px">' + c.unread + "</em>" : c.pending === "outgoing" ? '<span class="caption">⏳</span>' : c.blocked ? '<span class="caption">🚫</span>' : '<span class="ticks">' + E.icon("check-check") + "</span>") +
           "</span></button>";
       }).join("");
       inner = search + banner + (rows || E.empty({ emoji: "💬", title: "No chats yet", sub: "Find a training partner in Discover.", button: E.btn("Discover people", { size: "md", attrs: 'data-action="chat-tab" data-value="discover"' }) }));
@@ -121,7 +121,8 @@
     const sub = chat.type === "group" ? (chat.members || []).length + " members" : (chat.pending === "outgoing" ? "Request sent" : chat.online ? "Online" : "Last seen recently");
     const top = E.backBtn() + '<button type="button" class="row gap8 grow" style="border:0;background:transparent;text-align:left;color:inherit" data-action="' + (chat.type === "group" ? "open-group" : "noop") + '" data-id="' + chat.id + '">' +
       E.avatar({ name: chat.name, initials: chat.initials, color: chat.color, size: 36 }) +
-      '<span class="grow"><span class="heading" style="font-size:16px">' + E.esc(chat.name) + '</span><span class="caption" style="display:block">' + (E.state.typing === chat.id ? "typing…" : sub) + "</span></span></button>";
+      '<span class="grow"><span class="heading" style="font-size:16px">' + E.esc(chat.name) + '</span><span class="caption" style="display:block">' + (E.state.typing === chat.id ? "typing…" : sub) + "</span></span></button>" +
+      (chat.type === "group" ? "" : E.iconBtn("ellipsis-vertical", 'data-action="chat-more" data-testid="chat-more" aria-label="Report or block"', "flat"));
     let banner = "";
     let locked = false;
     if (chat.pending === "incoming") {
@@ -134,7 +135,8 @@
       banner = '<div class="banner mt8"><span>⏳</span><span><b>Request sent</b><div class="caption">You\'ll be able to chat when they accept.</div></span></div>';
     } else if (chat.blocked) {
       locked = true;
-      banner = '<div class="banner amber mt8"><span>🚫</span><span><b>You blocked ' + E.esc(chat.name) + '</b><div class="caption">Unblock from Privacy & Safety if that was a mistake.</div></span></div>';
+      banner = '<div class="banner amber mt8"><span>🚫</span><span class="grow"><b>You blocked ' + E.esc(chat.name) + '</b><div class="caption">They can\'t message you. Tapped by mistake?</div></span>' +
+        E.btn("Unblock", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="unblock-chat" data-testid="chat-unblock"' }) + "</div>";
     }
     let lastDay = "";
     const msgs = (chat.messages || []).map(function (m) {
@@ -220,14 +222,17 @@
     if (!c || c.archived) return E.page({ top: E.topTitle("Community"), body: E.empty({ emoji: "🌍", title: "Community not found" }) });
     const view = E.state.ui.commView || "feed";
     const joined = !!c.joined;
-    const posts = (c.posts || []).map(function (post) {
+    const posts = (c.posts || []).filter(function (post) { return !post.hidden; }).map(function (post) {
       const open = E.state.ui.openPost === post.id;
+      const n = (post.replies || []).length;
       const replies = (post.replies || []).map(function (r) {
         return '<div class="card mt8" style="padding:10px 12px"><b>' + E.esc(r.author) + '</b><div class="caption mt4">' + E.esc(r.text) + "</div></div>";
       }).join("");
-      return '<div class="card mt12"><div class="heading" style="font-size:15px">' + E.esc(post.author) + '</div><p class="body mt8">' + E.esc(post.text) + '</p>' +
-        '<div class="row gap12 mt8"><button type="button" class="chip ' + (post.liked ? "on" : "") + '" data-action="like-post" data-id="' + post.id + '" data-cid="' + c.id + '">♥ ' + (post.likes || 0) + '</button>' +
-        '<button type="button" class="chip" data-action="toggle-replies" data-id="' + post.id + '">💬 ' + ((post.replies || []).length) + " replies</button></div>" +
+      const mine = post.author === "You";
+      return '<div class="card mt12"><div class="between"><span class="heading" style="font-size:15px">' + E.esc(post.author) + '</span><span class="caption">' + E.esc(post.time || "") + '</span></div><p class="body mt8">' + E.esc(post.text) + '</p>' +
+        '<div class="row gap12 mt8"><button type="button" class="chip ' + (post.liked ? "on" : "") + '" data-action="like-post" data-id="' + post.id + '" data-cid="' + c.id + '" aria-label="Like">♥ ' + (post.likes || 0) + '</button>' +
+        '<button type="button" class="chip" data-action="toggle-replies" data-id="' + post.id + '">💬 ' + (n ? n + (n === 1 ? " reply" : " replies") : "Reply") + "</button>" +
+        (mine ? "" : '<button type="button" class="chip" style="margin-left:auto" data-action="report-post" data-id="' + post.id + '" data-cid="' + c.id + '" data-testid="post-report" aria-label="Report post">' + E.icon("flag") + "</button>") + "</div>" +
         (open ? replies + (joined ? '<div class="mt8">' + E.field({ id: "reply", model: "reply-draft", value: E.state.ui.replyDraft, placeholder: "Write a reply" }) + "</div>" +
           '<div class="mt8">' + E.btn("Reply", { size: "sm", attrs: 'data-action="send-reply" data-id="' + post.id + '" data-cid="' + c.id + '"' }) + "</div>" : "") : "") +
         "</div>";
@@ -243,18 +248,19 @@
     const about = '<div class="card mt12"><b>About</b><p class="body muted mt8">' + E.esc(c.description || "No description yet.") + '</p><p class="caption mt8">' + E.esc(c.city || "") + "</p></div>" +
       '<div class="card mt12"><b>Rules</b><p class="body muted mt8">' + E.esc(c.rules || "Be kind.") + "</p></div>";
     const pane = view === "members" ? members : view === "about" ? about : posts;
-    const composer = view === "feed" && joined ? '<div class="mt16">' + E.field({ id: "post", model: "post-draft", value: E.state.ui.postDraft, placeholder: "Share with the group" }) +
-      '<div class="mt8">' + E.btn("Post", { attrs: 'data-action="community-post" data-cid="' + c.id + '"' }) + "</div></div>" : "";
+    const composer = view === "feed" && joined ? '<div class="card mt12"><textarea class="plain-area" id="post" data-model="post-draft" rows="2" placeholder="Share a win or ask the group…" data-testid="post-draft">' + E.esc(E.state.ui.postDraft || "") + "</textarea>" +
+      '<div class="mt8">' + E.btn("Post", { size: "md", attrs: 'data-action="community-post" data-cid="' + c.id + '" data-testid="post-send"' }) + "</div></div>"
+      : view === "feed" && !joined ? '<div class="banner mt12"><span>👋</span><span class="grow"><b>Join to post and reply</b><div class="caption">You can read the feed first.</div></span></div>' : "";
     const join = joined
-      ? E.btn("Leave", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="leave-community" data-cid="' + c.id + '"' })
+      ? E.btn("Leave", { size: "sm", variant: "ghost", block: false, attrs: 'data-action="leave-community" data-cid="' + c.id + '" data-testid="community-leave"' })
       : E.btn("Join", { size: "sm", block: false, attrs: 'data-action="join-community" data-cid="' + c.id + '"' });
     const top = E.backBtn() + '<div class="top-title"><div class="heading">' + E.esc(c.name) + '</div><div class="caption">' + c.members + " members</div></div>" +
-      (c.admin ? E.iconBtn("settings", 'data-action="go" data-screen="community-settings" data-id="' + c.id + '"', "flat") : "");
+      (c.admin ? E.iconBtn("settings", 'data-action="go" data-screen="community-settings" data-id="' + c.id + '" aria-label="Community settings"', "flat") : "");
     return E.page({
       top: top,
       body: '<div class="between mt4"><span class="caption">' + E.esc(c.city || "") + "</span>" + join + "</div>" +
         '<div class="mt12">' + E.segmented([{ id: "feed", label: "Feed" }, { id: "members", label: "Members" }, { id: "about", label: "About" }], view, "comm-view") + "</div>" +
-        pane + composer
+        composer + pane
     });
   };
 
@@ -366,6 +372,37 @@
       '<span class="caption">' + E.num(meal.kcal || 0) + " kcal · P " + (meal.p || 0) + " · C " + (meal.c || 0) + " · F " + (meal.f || 0) + "</span></span></div>" +
       (meal.note ? '<p class="body mt12">' + E.esc(meal.note) + "</p>" : "") +
       '<div class="share-dock">' + E.btn("Close", { variant: "secondary", attrs: 'data-action="close-modal" data-testid="shared-meal-close"' }) + "</div></div></div>";
+  };
+
+  E.modals["share-card"] = function () {
+    const days = E.weekDays(0);
+    const week = E.macroWeek(days);
+    const range = E.shortDate(days[0].iso) + " – " + E.shortDate(days[6].iso);
+    const card = '<div class="share-week mt12" data-testid="share-week-card"><div class="overline" style="color:#C6F135">This week</div><div class="title mt8" style="color:white">' + E.esc(range) + '</div>' +
+      '<div class="heading mt12" style="color:white">Hit ' + week.hitDays + " of 7</div>" +
+      '<p class="caption mt8" style="color:rgba(255,255,255,.75)">Protein ' + week.avgProtein + " g · target " + week.proteinTarget + " g · streak " + week.longest + " day" + (week.longest === 1 ? "" : "s") + "</p>" +
+      '<p class="caption mt8" style="color:rgba(255,255,255,.6)">A hit day is calories within 10%, and protein at least 90%.</p>' +
+      '<p class="body mt12" style="color:white">' + E.esc(week.focus) + "</p></div>";
+    if (youngShare()) {
+      return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal"></button><div class="sheet"><div class="grabber"></div>' + card +
+        E.empty({ emoji: "🌱", title: "Sharing opens at 18", sub: "The week stays on your phone. Sending it in chat opens at 18." }) +
+        '<div class="mt12">' + E.btn("Close", { variant: "secondary", attrs: 'data-action="close-modal"' }) + "</div></div></div>";
+    }
+    const people = sharePeople();
+    const chosen = people.find(function (p) { return p.id === E.state.ui.shareWeekChat; });
+    const list = people.length
+      ? '<div class="heading mt16" style="font-size:16px">Send to</div><div class="list-card mt8">' + people.map(function (c) {
+        const on = E.state.ui.shareWeekChat === c.id;
+        return '<button type="button" class="nav-row' + (on ? " on" : "") + '" data-action="pick-week-chat" data-id="' + c.id + '" data-testid="share-week-friend">' +
+          E.avatar({ name: c.name, color: c.color, initials: c.initials, size: 42 }) +
+          '<span class="grow"><span class="heading" style="font-size:15px">' + E.esc(c.name) + "</span></span>" +
+          (on ? E.icon("check") : "") + "</button>";
+      }).join("") + "</div>"
+      : E.empty({ emoji: "👋", title: "No one to send this to yet", sub: "Accept a chat first. The card stays here until then." });
+    return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet"><div class="grabber"></div>' +
+      '<div class="heading">Share this week</div><p class="caption mt8">Hit days and protein only. Meals stay in your diary.</p>' +
+      card + list +
+      '<div class="mt16">' + E.btn(chosen ? "Send to " + chosen.name.split(" ")[0] : "Choose one person", { disabled: !chosen, attrs: 'data-action="send-week-card" data-testid="share-week-send"' }) + "</div></div></div>";
   };
 
   E.modals["chat-meal"] = function () {

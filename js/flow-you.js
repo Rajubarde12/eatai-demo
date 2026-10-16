@@ -30,7 +30,7 @@
     const settings = [
       ["sparkles", "Coach", "Daily check-ins, timing, summaries", "settings-coach"],
       ["droplet", "Water", "Glass size, target, reminders", "settings-water"],
-      ["flame", "Streak", "Mode, freeze, home chip", "settings-streak"],
+      ["flame", "Streak", "This week, calendar, freeze", "settings-streak"],
       ["sliders-horizontal", "Tracking & units", "kg/lb, weigh-in, adaptive", "settings-tracking"],
       ["image", "Progress photo alerts", "Weekly reminder and export", "settings-photos"]
     ];
@@ -54,6 +54,8 @@
       proCard +
       '<div class="card mt12 between"><div class="grow"><div class="heading" style="font-size:15px">AI Processing</div><div class="caption">Photo estimates stay on this demo device until you allow them.</div></div>' +
       E.switch(!!u.ai, 'data-action="ai-toggle"') + "</div>" +
+      '<div class="card mt12 between"><div class="grow"><div class="heading" style="font-size:15px">Bigger text</div><div class="caption">Larger words and buttons across the app.</div></div>' +
+      E.switch(!!(E.state.prefs.display && E.state.prefs.display.largeText), 'data-action="toggle-large-text" data-testid="large-text-toggle" aria-label="Bigger text"') + "</div>" +
       '<div class="overline mt24">Features</div><div class="list-card mt8">' + featureHtml + "</div>" +
       '<div class="overline mt24">App settings</div><div class="list-card mt8">' + settings.map(function (s) { return E.navRow(s[0], s[1], s[2], 'data-action="go" data-screen="' + s[3] + '"'); }).join("") + "</div>" +
       '<div class="overline mt24">Privacy & safety</div><div class="list-card mt8">' +
@@ -128,7 +130,9 @@
     const pro = E.isPro() || sub.status === "cancelled";
     const name = sub.plan === "yearly" ? "Yearly Pro" : sub.plan === "half" ? "6-Month Pro" : sub.plan === "monthly" ? "Monthly Pro" : "Free";
     const status = sub.status === "active" ? "Active" : sub.status === "trial" ? "Trial" : sub.status === "cancelled" ? "Cancelled" : "Free";
-    const when = sub.renewsAt ? "Renews " + E.niceDate(sub.renewsAt) : sub.endsAt ? "Ends " + E.niceDate(sub.endsAt) : "No renewal scheduled";
+    const when = sub.status === "trial" && sub.renewsAt
+      ? "Free trial until " + E.niceDate(sub.renewsAt) + ". Then autopay ₹" + E.num(E.planPrices[sub.plan === "half" ? "sixmonth" : sub.plan] || 1999) + " by the store unless you cancel"
+      : sub.renewsAt ? "Renews " + E.niceDate(sub.renewsAt) : sub.endsAt ? "Ends " + E.niceDate(sub.endsAt) : "No renewal scheduled";
     const days = sub.endsAt ? Math.max(0, Math.round((E.parseIso(sub.endsAt) - new Date()) / 86400000)) : null;
     const history = (E.state.payments || []).map(function (p) {
       return '<div class="between" style="padding:10px 0;border-bottom:1px solid rgba(18,18,16,.06)"><div><div class="heading" style="font-size:14px">₹' + E.num(p.amount) + '</div><div class="caption">' + E.niceDate(p.date) + " · " + E.esc(p.plan || "") + '</div></div><span class="label">' + E.esc(p.status) + "</span></div>";
@@ -148,7 +152,7 @@
 
   E.modals.paywall = function () {
     const u = E.state.user;
-    const pro = E.isPro();
+    const pro = E.isPro() && u.subscription.status !== "cancelled";
     const plan = E.state.ui.selectedPlan || "yearly";
     const off = E.state.ui.offerOff || 0;
     const priceOf = function (n) { return off ? "₹" + E.num(Math.round(n * (1 - off))) : "₹" + E.num(n); };
@@ -157,35 +161,59 @@
       { id: "sixmonth", name: "6 months", price: priceOf(999), per: "₹167 / month", note: "" },
       { id: "monthly", name: "Monthly", price: priceOf(299), per: "Billed monthly", note: "" }
     ];
+    const gate = E.state.ui.pendingGate;
+    const scanGate = gate === "shutter" || gate === "describe" || gate === "barcode";
+    const freeWhy = (gate === "barcode" ? "Barcode scanning" : gate === "describe" ? "Describe meal" : "AI photo scan") +
+      " is part of Pro. Try Pro free for 3 days, or log for free from the food list.";
+    const freeWay = scanGate
+      ? '<div class="mt8">' + E.btn("Not now, use the food list", { variant: "ghost", attrs: 'data-action="use-food-list" data-testid="paywall-food-list" style="color:white"' }) + "</div>"
+      : "";
     if (u.isGuest) {
-      return '<div class="paywall"><button type="button" class="icon-btn on-photo" data-action="close-modal">' + E.icon("x") + '</button><div class="title mt20">Add your email</div><p class="body mt8" style="color:rgba(255,255,255,.7)">We\'ll send a code and bring you back to this plan. This demo never charges you.</p><div class="mt20">' +
-        E.btn("Add your email", { variant: "accent", attrs: 'data-action="guest-pro" data-testid="paywall-claim-email"' }) + "</div></div>";
+      return '<div class="paywall"><button type="button" class="icon-btn on-photo" data-action="close-modal" aria-label="Close">' + E.icon("x") + '</button>' +
+        (scanGate ? '<div class="overline mt20" style="color:var(--lime)">Why this stopped</div><p class="body mt8" style="color:rgba(255,255,255,.85)">' + E.esc(freeWhy) + "</p>" : "") +
+        '<div class="title mt20">' + (E.trialOpen() ? "Add your email to start your 3-day free trial" : "Add your email to see Pro") + '</div><p class="body mt8" style="color:rgba(255,255,255,.7)">Pro needs an account so your purchase isn\'t lost. We\'ll send a code, keep your meals, and bring you back here. This demo never charges you.</p><div class="mt20">' +
+        E.btn("Add your email", { variant: "accent", attrs: 'data-action="guest-pro" data-testid="paywall-claim-email"' }) + "</div>" + freeWay + "</div>";
     }
     const provider = E.state.ui.billingProvider || "store";
     const razor = provider === "razorpay";
+    const trial = E.trialOpen() && !razor;
     const perks = [["scan", "Unlimited AI photo and text scans"], ["barcode", "Barcode scanner"], ["sparkles", "Daily AI coach"], ["trending-up", "Weight trend and weekly reports"], ["droplet", "Water, streaks and saved meals"]];
+    const gateWhy = scanGate && !pro ? freeWhy : {
+      "streak-goal": "Hit-goal streak is Pro. Any logged meal still counts for free.",
+      "streak-freeze": "A monthly freeze saves one missed day. The home chip stays free.",
+      "streak-runs": "Ended streaks show past runs and why each one stopped.",
+      "share-card": "The week card shares hit days and protein, not your whole diary.",
+      "ai-read": "AI read compares two private photos. They stay on this phone."
+    }[E.state.ui.pendingGate] || "";
     const chosen = plans.find(function (p) { return p.id === plan; }) || plans[0];
     const offer = razor ? '<div class="mt12">' + E.field({ label: "Offer code", id: "offer", model: "offer-code", value: E.state.ui.offerCode, placeholder: "SAVE20" }) +
       (E.state.ui.offerError ? '<p class="field-error mt8">' + E.esc(E.state.ui.offerError) + "</p>" : "") +
       '<div class="mt8">' + E.btn(off ? "Offer applied · 20% off" : "Apply code", { size: "md", variant: "light", attrs: 'data-action="apply-offer"' }) + "</div></div>" : "";
     return '<div class="paywall"><div class="between"><button type="button" class="icon-btn" style="background:rgba(255,255,255,.12);color:white" data-action="close-modal" aria-label="Close">' + E.icon("x") + '</button><span class="gold">EATAI PRO</span><span style="width:44px"></span></div>' +
-      '<div class="display mt12" style="font-size:34px">' + (pro ? "You're on Pro" : "Hit your goals 2× faster") + "</div>" +
+      '<div class="display mt12" style="font-size:34px">' + (pro ? "You're on Pro" : "Log without limits") + "</div>" +
+      (gateWhy ? '<p class="body mt8" style="color:rgba(255,255,255,.8)">' + E.esc(gateWhy) + "</p>" : "") +
       '<div class="mt12">' + E.segmented([{ id: "store", label: "App Store / Play" }, { id: "razorpay", label: "Razorpay" }], provider, "billing-provider") + "</div>" +
       '<div class="mt16">' + perks.map(function (p) { return '<div class="row gap12" style="padding:6px 0"><span class="ico-sq" style="background:rgba(255,255,255,.08);color:var(--lime)">' + E.icon(p[0] === "barcode" ? "scan-barcode" : p[0]) + '</span><span>' + p[1] + "</span></div>"; }).join("") + "</div>" +
       '<div class="mt12" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">' + plans.map(function (p) {
         return '<button type="button" class="plan ' + (plan === p.id ? "on" : "") + '" data-action="pick-plan" data-id="' + p.id + '"><div class="caption" style="color:#e6c56a">' + p.note + '</div><div class="label">' + p.name + '</div><b>' + p.price + '</b><div class="caption" style="color:rgba(255,255,255,.65)">' + p.per + "</div></button>";
       }).join("") + "</div>" + offer +
-      '<div class="mt12">' + E.btn(pro ? "You're subscribed" : "Continue · " + chosen.price, { variant: "accent", disabled: pro, busy: E.state.ui.busy === "buy", attrs: 'data-action="buy"' }) + "</div>" +
-      (!u.subscription.trialUsed && !pro && !razor ? '<div class="mt8">' + E.btn("Start 3-day free trial", { variant: "light", attrs: 'data-action="trial"' }) + "</div>" : "") +
+      (trial
+        ? '<div class="mt12">' + E.btn("Start 3-day free trial", { variant: "accent", attrs: 'data-action="trial" data-testid="paywall-trial"' }) + "</div>" +
+          '<p class="caption center mt8" style="color:rgba(255,255,255,.75)" data-testid="trial-terms">Free until ' + E.niceDate(E.iso(E.addDays(3))) + ". Then " + chosen.price + " " + (plan === "monthly" ? "every month" : plan === "sixmonth" ? "every 6 months" : "every year") + ", auto-paid by the store. Cancel before then and you pay nothing.</p>" +
+          '<div class="mt8">' + E.btn("Pay now · " + chosen.price, { variant: "light", busy: E.state.ui.busy === "buy", attrs: 'data-action="buy" data-testid="paywall-buy"' }) + "</div>"
+        : '<div class="mt12">' + E.btn(pro ? "You're subscribed" : "Continue · " + chosen.price, { variant: "accent", disabled: pro, busy: E.state.ui.busy === "buy", attrs: 'data-action="buy" data-testid="paywall-buy"' }) + "</div>") +
+      freeWay +
       '<p class="caption center mt12" style="color:rgba(255,255,255,.55)">Demo only — you won\'t be charged. Billed via ' + (razor ? "Razorpay" : "App Store / Play") + ". Offer codes work on Razorpay. SAVE20 is 20% off.</p></div>";
   };
 
   E.modals["ai-consent"] = function () {
+    const photo = E.state.ui.pendingGate === "ai-read";
     return '<div class="modal-wrap" style="background:var(--canvas);overflow:auto;padding:16px 20px 28px"><div class="overline">Before we estimate</div><div class="title mt8">Allow AI Processing?</div>' +
       '<p class="body muted mt12">Food scan and describe meal send the photo or the text you type so we can estimate calories. We don\'t use it for ads. You can turn this off later on Profile.</p>' +
+      (photo ? '<p class="body mt12">This step is a private photo compare. The pictures stay on this phone.</p>' : "") +
       '<div class="mt20">' + E.btn("Allow AI Processing", { attrs: 'data-action="ai-allow" data-testid="ai-allow"' }) + "</div>" +
       '<div class="mt8">' + E.btn("Not now", { variant: "secondary", attrs: 'data-action="ai-not-now" data-testid="ai-not-now"' }) + "</div>" +
-      '<p class="caption center mt12">If you choose Not now, food scan and describe stay off.</p></div>';
+      '<p class="caption center mt12">' + (photo ? "Not now leaves the photos as they are. Scan stays off too." : "Not now? You can still log from the food list. No AI needed.") + "</p></div>";
   };
 
   function settingsShell(title, sub, body) {
@@ -223,12 +251,81 @@
       E.iconBtn("plus", 'data-action="pref-step" data-key="' + key + '" data-dir="1"', "ink") + "</div></div>";
   }
   E.screens["settings-streak"] = function () {
-    const s = E.state.prefs.streak;
-    return settingsShell("Streak", "Mode, freeze, home chip",
-      '<div class="caption">A missed day can use a freeze instead of resetting. No guilt copy — just the count.</div>' +
-      '<div class="mt12">' + E.segmented([{ id: "meals", label: "Any meal" }, { id: "goal", label: "Hit goal" }], s.mode, "streak-mode") + "</div>" +
-      '<div class="list-card mt12">' + rowToggle("Use freezes", "Spend one on a missed day", s.freeze, "prefs.streak.freeze") +
-      rowToggle("Home chip", "Show the fire pill on Home", s.showChip, "prefs.streak.showChip") + "</div>");
+    const s = E.state.prefs.streak || {};
+    const pro = E.isPro();
+    const mode = pro && s.mode === "goal" ? "goal" : "meals";
+    const freezeOn = !!(pro && s.freeze);
+    return settingsShell("Streak", "Home chip, mode, and history",
+      '<div class="list-card">' +
+      E.navRow("target", "This week", "7-day summary and share card", 'data-action="open-report" data-testid="streak-week"') +
+      E.navRow("flame", "Daily streak log", "Counted, logged, missed, and freeze", 'data-action="go" data-screen="streak-log" data-testid="streak-log-open"') +
+      E.navRow("history", "Ended streaks", pro ? "Past runs and why each stopped" : "Pro — past runs and why each stopped", 'data-action="go" data-screen="streak-runs" data-testid="streak-runs-open"') +
+      "</div>" +
+      '<div class="overline mt16">Display and mode</div>' +
+      '<div class="list-card mt8">' + rowToggle("Home chip", "Show the fire pill on Home", s.showChip !== false, "prefs.streak.showChip") + "</div>" +
+      '<p class="caption mt12">Any meal counts a day. Hit goal counts only when calories and protein land in range.</p>' +
+      '<div class="mt8">' + E.segmented([{ id: "meals", label: "Any meal" }, { id: "goal", label: pro ? "Hit goal" : "Hit goal · Pro" }], mode, "streak-mode") + "</div>" +
+      '<div class="list-card mt12"><div class="set-row"><div class="grow"><div class="heading" style="font-size:15px">Monthly freeze</div><div class="caption">Save one missed day each month' + (pro ? "" : " (Pro)") + "</div></div>" +
+      (pro ? E.switch(freezeOn, 'data-action="streak-freeze" data-testid="streak-freeze"') : '<button type="button" class="switch" data-action="streak-freeze" data-testid="streak-freeze" aria-label="Pro"><span class="knob"></span></button>') +
+      "</div></div>" +
+      (freezeOn ? '<p class="caption mt8">One gap this month stays on the streak. A second missed day still breaks it.</p>' : ""));
+  };
+  E.screens["streak-log"] = function () {
+    const range = Number(E.state.ui.streakRange) || 14;
+    const days = E.streakDays(range);
+    const today = E.todayIso();
+    const picked = days.find(function (d) { return d.iso === E.state.ui.streakDay; }) || days.find(function (d) { return d.iso === today; }) || days[days.length - 1];
+    const first = days.length ? E.parseIso(days[0].iso) : new Date();
+    const pad = (first.getDay() + 6) % 7;
+    let cells = "";
+    for (let i = 0; i < pad; i++) cells += '<span class="cal-cell empty"></span>';
+    days.forEach(function (d) {
+      const on = picked && picked.iso === d.iso ? " on" : "";
+      cells += '<button type="button" class="cal-cell ' + d.status + on + (d.iso === today ? " today" : "") + '" data-action="streak-day" data-iso="' + d.iso + '" data-testid="streak-day" aria-label="' + d.status + " " + d.date + '">' + d.date + "</button>";
+    });
+    const counts = { counted: 0, logged: 0, missed: 0, freeze: 0 };
+    days.forEach(function (d) { if (counts[d.status] != null) counts[d.status] += 1; });
+    const goalMode = E.isPro() && E.state.prefs.streak && E.state.prefs.streak.mode === "goal";
+    const ranges = [7, 14, 30, 40, 100].map(function (n) {
+      return '<button type="button" class="chip ' + (range === n ? "on" : "") + '" data-action="streak-range" data-value="' + n + '" data-testid="streak-range">' + n + "d</button>";
+    }).join("");
+    const detail = picked
+      ? '<div class="card mt16"><div class="heading" style="font-size:16px">' + E.esc(E.longDate(picked.iso)) + '</div><p class="body mt8">' + E.esc(picked.source) + (picked.meals ? " · " + E.num(picked.kcal) + " kcal" : "") + "</p>" +
+        (picked.status === "missed" ? '<p class="caption mt8">A missed day is information. Today\'s target does not change.</p>' : "") + "</div>"
+      : "";
+    return E.page({
+      top: E.topTitle("Daily streak log", "Counted, logged, missed, freeze"),
+      body: '<div class="hscroll">' + ranges + "</div>" +
+        '<p class="caption mt12">Missed days do not change today\'s target. ' + counts.counted + " counted · " + (goalMode ? counts.logged + " logged · " : "") + counts.freeze + " freeze · " + counts.missed + " missed</p>" +
+        '<div class="cal-head mt12"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>' +
+        '<div class="cal-grid mt8">' + cells + "</div>" +
+        '<div class="legend mt12">' +
+        '<span><i class="dot counted"></i>Counted</span><span><i class="dot logged"></i>Logged</span><span><i class="dot freeze"></i>Freeze</span><span><i class="dot missed"></i>Missed</span></div>' +
+        detail
+    });
+  };
+  const RUN_REASON = { missed_day: "Missed a day", freeze_unavailable: "No freeze left", manual_reset: "Reset" };
+  E.screens["streak-runs"] = function () {
+    if (!E.isPro()) {
+      return E.page({
+        top: E.topTitle("Ended streaks"),
+        body: E.empty({
+          emoji: "🔥",
+          title: "Past runs are part of Pro",
+          sub: "Each ended streak shows how long it lasted, and why it stopped. Your current streak on Home stays free.",
+          button: E.btn("See ended streaks · Pro", { attrs: 'data-action="streak-runs-pro" data-testid="streak-runs-pro"' })
+        })
+      });
+    }
+    const runs = E.state.streakRuns || [];
+    const rows = runs.map(function (r) {
+      return '<div class="card mt12"><div class="between"><div class="heading" style="font-size:16px">' + r.length + " days</div><span class=\"caption\">" + E.esc(RUN_REASON[r.reason] || "Ended") + "</span></div>" +
+        '<p class="caption mt8">' + E.esc(E.shortDate(r.start)) + " – " + E.esc(E.shortDate(r.end)) + "</p></div>";
+    }).join("");
+    return E.page({
+      top: E.topTitle("Ended streaks", "Why each run stopped"),
+      body: rows || E.empty({ emoji: "🔥", title: "No ended streaks yet", sub: "The one you're on is still going." })
+    });
   };
   E.screens["settings-tracking"] = function () {
     const u = E.state.prefs.units;
@@ -262,8 +359,9 @@
       '<div class="mt8">' + E.chips(["11:00", "15:00", "16:30"], E.state.ui.customTime || "15:00", "custom-time") + "</div>" +
       '<div class="mt12">' + E.btn("Add custom reminder", { attrs: 'data-action="add-reminder"' }) + "</div>" +
       (r.custom || []).map(function (c) {
-        return '<div class="between card mt12"><div><b>' + E.esc(c.title) + '</b><div class="caption">' + E.esc(c.time) + " · " + (c.on ? "On" : "Off") + "</div></div>" +
-          E.btn(c.on ? "Turn off" : "Turn on", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="toggle-reminder" data-id="' + c.id + '"' }) + "</div>";
+        return '<div class="card mt12"><div class="between"><div><b>' + E.esc(c.title) + '</b><div class="caption">' + E.esc(c.time) + " · " + (c.on ? "On" : "Off") + "</div></div>" +
+          E.btn(c.on ? "Turn off" : "Turn on", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="toggle-reminder" data-id="' + c.id + '"' }) + "</div>" +
+          '<div class="mt8">' + E.btn("Edit", { size: "sm", variant: "ghost", attrs: 'data-action="edit-reminder" data-id="' + c.id + '" data-testid="reminder-edit"' }) + "</div></div>";
       }).join(""));
   };
 
@@ -286,10 +384,39 @@
     return E.page({ top: E.topTitle("Water history"), body: rows || E.empty({ emoji: "💧", title: "No glasses yet" }) });
   };
   E.screens["coach-history"] = function () {
-    const rows = (E.state.coachHistory || []).map(function (c) {
-      return '<div class="card mt12"><div class="caption">' + E.shortDate(c.date) + '</div><div class="heading mt8">' + E.esc(c.title) + '</div><p class="body mt8">' + E.esc(c.body) + '</p>' + (c.tip ? '<div class="coach-tip mt8">💡 ' + E.esc(c.tip) + "</div>" : "") + "</div>";
+    const items = (E.state.coachHistory || []).slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+    const weekly = (E.state.coachHistory || []).filter(function (c) { return c.type === "weekly"; }).slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; }).slice(-4);
+    const bars = weekly.length
+      ? '<div class="card"><div class="overline">Hit days, last ' + weekly.length + ' weeks</div><div class="week-bars mt12">' + weekly.map(function (w) {
+        const h = Math.max(8, Math.round(((w.hitDays || 0) / 7) * 72));
+        return '<div><span style="height:' + h + 'px;background:var(--ink)"></span><em>' + (w.hitDays || 0) + "</em></div>";
+      }).join("") + "</div><p class=\"caption mt8\">Each bar is days that hit calories and protein.</p></div>"
+      : "";
+    const rows = items.map(function (c) {
+      return '<div class="card mt12"><button type="button" class="plain" style="width:100%;text-align:left;color:inherit" data-action="open-coach" data-id="' + E.esc(c.id) + '">' +
+        '<div class="caption">' + E.shortDate(c.date) + (c.type === "weekly" ? " · Week" : "") + '</div><div class="heading mt8">' + E.esc(c.title) + '</div><p class="body mt8">' + E.esc(c.body) + "</p></button>" +
+        '<div class="mt8">' + E.btn("Delete", { size: "sm", variant: "ghost", attrs: 'data-action="ask-delete-coach" data-id="' + E.esc(c.id) + '" data-testid="coach-delete"' }) + "</div></div>";
     }).join("");
-    return E.page({ top: E.topTitle("Coach history"), body: rows || E.empty({ emoji: "✨", title: "No notes yet" }) });
+    const clear = items.length ? '<div class="mt16">' + E.btn("Clear history", { variant: "secondary", attrs: 'data-action="ask-clear-coach" data-testid="coach-clear"' }) + "</div>" : "";
+    return E.page({ top: E.topTitle("Coach history", "Notes you can open or delete"), body: (bars || "") + rows + clear || E.empty({ emoji: "✨", title: "No notes yet" }) });
+  };
+  E.modals["coach-note"] = function () {
+    const note = (E.state.coachHistory || []).find(function (c) { return c.id === E.state.ui.coachOpen; });
+    if (!note) return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal"></button><div class="sheet"><div class="grabber"></div>' + E.empty({ emoji: "✨", title: "This note is gone" }) + "</div></div>";
+    return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet"><div class="grabber"></div>' +
+      '<div class="caption">' + E.shortDate(note.date) + (note.type === "weekly" ? " · Week" : "") + '</div><div class="title mt8">' + E.esc(note.title) + '</div><p class="body mt12">' + E.esc(note.body) + "</p>" +
+      (note.tip ? '<div class="coach-tip mt12">💡 ' + E.esc(note.tip) + "</div>" : "") +
+      '<div class="mt16">' + E.btn("Delete note", { variant: "secondary", attrs: 'data-action="ask-delete-coach" data-id="' + E.esc(note.id) + '"' }) + "</div></div></div>";
+  };
+  E.modals["edit-reminder"] = function () {
+    const row = (E.state.prefs.reminders.custom || []).find(function (c) { return c.id === E.state.ui.reminderEdit; });
+    if (!row) return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal"></button><div class="sheet"><div class="grabber"></div>' + E.empty({ emoji: "🔔", title: "This reminder is gone" }) + "</div></div>";
+    const times = ["08:00", "11:00", "15:00", "16:30", "20:00"];
+    return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet"><div class="grabber"></div><div class="title">Edit reminder</div>' +
+      '<div class="mt12">' + E.field({ label: "Title", id: "reminder-title", model: "reminder-title", value: E.state.ui.reminderTitle || "" }) + "</div>" +
+      '<div class="overline mt16">Time</div><div class="mt8">' + E.chips(times, E.state.ui.reminderTime || row.time, "reminder-time") + "</div>" +
+      '<div class="mt16">' + E.btn("Save reminder", { attrs: 'data-action="save-reminder" data-testid="reminder-save"' }) + "</div>" +
+      '<div class="mt8">' + E.btn("Delete reminder", { variant: "ghost", attrs: 'data-action="ask-delete-reminder" data-id="' + row.id + '" data-testid="reminder-delete"' }) + "</div></div></div>";
   };
   E.screens.photos = function () {
     if (!E.isPro()) {
@@ -306,11 +433,12 @@
     const pose = E.state.ui.photoPose === "side" ? "side" : "front";
     const photos = E.state.photos || [];
     const cards = photos.map(function (p) {
-      return '<button type="button" class="card" data-longpress="delete-photo" data-id="' + p.id + '" data-testid="progress-photo" style="border:0;text-align:left;color:inherit"><div class="photo" style="height:120px;border-radius:16px;background:hsl(' + (p.hue || 40) + ',35%,78%)"><span>📷</span></div><div class="heading mt8" style="font-size:15px">' + E.esc(p.pose === "side" ? "Side" : "Front") + '</div><div class="caption">' + E.niceDate(p.date) + "</div></button>";
+      return '<button type="button" class="card" data-action="open-photo" data-longpress="delete-photo" data-id="' + p.id + '" data-testid="progress-photo" style="border:0;text-align:left;color:inherit"><div class="photo" style="height:120px;border-radius:16px;background:hsl(' + (p.hue || 40) + ',35%,78%)"><span>📷</span></div><div class="heading mt8" style="font-size:15px">' + E.esc(p.pose === "side" ? "Side" : "Front") + '</div><div class="caption">' + E.niceDate(p.date) + "</div></button>";
     }).join("");
     const same = photos.filter(function (p) { return (p.pose || "front") === "front"; }).slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
     const compare = same.length >= 2
-      ? '<div class="overline mt16">Front, then and now</div><div class="photo-compare mt8" data-testid="photo-compare"><div class="card"><div class="photo" style="height:140px;border-radius:16px;background:hsl(' + same[0].hue + ',35%,78%)"><span>📷</span></div><div class="caption mt8">Then · ' + E.niceDate(same[0].date) + '</div></div><div class="card"><div class="photo" style="height:140px;border-radius:16px;background:hsl(' + same[same.length - 1].hue + ',35%,78%)"><span>📷</span></div><div class="caption mt8">Now · ' + E.niceDate(same[same.length - 1].date) + "</div></div></div><p class=\"caption mt8\">Same pose only. A front is never compared with a side.</p>"
+      ? '<div class="overline mt16">Front, then and now</div><div class="photo-compare mt8" data-testid="photo-compare"><div class="card"><div class="photo" style="height:140px;border-radius:16px;background:hsl(' + same[0].hue + ',35%,78%)"><span>📷</span></div><div class="caption mt8">Then · ' + E.niceDate(same[0].date) + '</div></div><div class="card"><div class="photo" style="height:140px;border-radius:16px;background:hsl(' + same[same.length - 1].hue + ',35%,78%)"><span>📷</span></div><div class="caption mt8">Now · ' + E.niceDate(same[same.length - 1].date) + "</div></div></div><p class=\"caption mt8\">Same pose only. A front is never compared with a side.</p>" +
+        '<div class="mt12">' + E.btn("Get AI read", { variant: "secondary", attrs: 'data-action="ai-read" data-a="' + same[0].id + '" data-b="' + same[same.length - 1].id + '" data-testid="photo-ai-read"' }) + "</div>"
       : "";
     const grid = cards ? '<div class="grid2 mt16">' + cards + "</div><p class=\"caption mt8\">Hold a photo to delete it.</p>" : E.empty({ emoji: "📷", title: "No photos yet", sub: "Add one when you feel ready. Same corner, same light." });
     return E.page({
@@ -321,6 +449,43 @@
         '<div class="mt12">' + E.btn("Add " + pose + " photo", { attrs: 'data-action="add-photo" data-testid="photo-add"' }) + "</div>" +
         compare + grid
     });
+  };
+  function photoById(id) {
+    return (E.state.photos || []).find(function (p) { return p.id === id; }) || null;
+  }
+  function photoTile(p, label) {
+    if (!p) return "";
+    return '<div class="card"><div class="photo" style="height:140px;border-radius:16px;background:hsl(' + (p.hue || 40) + ',35%,78%)"><span>📷</span></div><div class="caption mt8">' + E.esc(label) + " · " + E.niceDate(p.date) + "</div></div>";
+  }
+  E.modals["photo-view"] = function () {
+    const photo = photoById(E.state.ui.photoView);
+    if (!photo) return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal"></button><div class="sheet"><div class="grabber"></div>' + E.empty({ emoji: "📷", title: "This photo is gone" }) + "</div></div>";
+    const pose = photo.pose || "front";
+    const others = (E.state.photos || []).filter(function (p) { return p.id !== photo.id && (p.pose || "front") === pose; });
+    const compareId = E.state.ui.photoCompare && others.some(function (p) { return p.id === E.state.ui.photoCompare; }) ? E.state.ui.photoCompare : (others[0] && others[0].id);
+    const picks = others.map(function (p) {
+      return '<button type="button" class="chip ' + (p.id === compareId ? "on" : "") + '" data-action="photo-compare" data-id="' + p.id + '">' + E.niceDate(p.date) + "</button>";
+    }).join("");
+    return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet"><div class="grabber"></div>' +
+      '<div class="heading">' + (pose === "side" ? "Side" : "Front") + '</div><p class="caption mt8">Only you. Hold the gallery photo to delete it.</p>' +
+      '<div class="photo mt12" style="height:180px;border-radius:18px;background:hsl(' + (photo.hue || 40) + ',35%,78%)"><span>📷</span></div>' +
+      (others.length
+        ? '<div class="overline mt16">Compare with</div><div class="hscroll mt8">' + picks + "</div>" +
+          '<div class="mt12">' + E.btn("Get AI read", { attrs: 'data-action="ai-read" data-a="' + photo.id + '" data-b="' + compareId + '" data-testid="photo-ai-read"' }) + "</div>"
+        : '<p class="caption mt12">Add one more ' + pose + " photo before an AI read.</p>") +
+      "</div></div>";
+  };
+  E.modals["ai-read"] = function () {
+    let a = photoById(E.state.ui.photoA);
+    let b = photoById(E.state.ui.photoB);
+    if (a && b && a.date > b.date) { const swap = a; a = b; b = swap; }
+    const read = E.photoRead(a, b);
+    return '<div class="sheet-wrap"><button type="button" class="backdrop" data-action="close-modal" aria-label="Close"></button><div class="sheet"><div class="grabber"></div>' +
+      '<div class="overline">AI read</div><div class="title mt8">' + E.esc(read.title) + "</div>" +
+      (a && b ? '<div class="photo-compare mt12">' + photoTile(a, "Then") + photoTile(b, "Now") + "</div>" : "") +
+      '<p class="body mt12">' + E.esc(read.body) + "</p>" +
+      (read.tip ? '<p class="caption mt8">' + E.esc(read.tip) + "</p>" : "") +
+      '<div class="mt16">' + E.btn("Done", { attrs: 'data-action="close-modal" data-testid="ai-read-done"' }) + "</div></div></div>";
   };
   E.screens.measurements = function () {
     const rows = (E.state.measurements || []).map(function (m) {
@@ -343,7 +508,7 @@
       top: E.topTitle("Privacy & Safety"),
       body: '<div class="card"><div class="heading">Discovery pause</div>' +
         (paused ? '<p class="caption mt8">Paused ' + (paused === "until" ? "until you return" : "until " + E.niceDate(paused)) + '.</p><div class="mt12">' + E.btn("Resume discovery", { size: "md", attrs: 'data-action="resume-discovery"' }) + "</div>" : '<p class="caption mt8">Hide yourself for a while. People you already chat with stay.</p>') +
-        '<div class="hscroll mt12">' + ["7", "14", "30", "until"].map(function (d) {
+        '<div class="mt12" style="display:flex;flex-wrap:wrap;gap:8px">' + ["7", "14", "30", "until"].map(function (d) {
           return '<button type="button" class="chip" data-action="pause" data-value="' + d + '">' + (d === "until" ? "Until I return" : d + " days") + "</button>";
         }).join("") + "</div></div>" +
         '<div class="list-card mt12">' + rowToggle("Discovery", "Let people nearby find you", p.discovery, "prefs.privacy.discovery") +

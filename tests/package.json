@@ -1,0 +1,11 @@
+{
+  "name": "eatai-demo-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test smoke.test.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.0"
+  }
+}

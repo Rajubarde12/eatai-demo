@@ -5,14 +5,15 @@
     const body = '<div data-longpress="dev" class="row gap12">' + E.logo(40) + '<span class="wordmark">EatAI</span></div>' +
       '<div class="demo-wrap mt20">' +
       '<div class="viewfinder">' +
-      '<span class="plate">🥗</span>' +
+      '<span class="plate">🍛</span>' +
       '<i class="bracket tl"></i><i class="bracket tr"></i><i class="bracket bl"></i><i class="bracket br"></i>' +
       '<i class="scanline"></i></div>' +
-      '<div class="float-chip a">Avocado bowl · detected · 98%</div>' +
-      '<div class="float-chip b">420 kcal · P 18 · C 32 · F 22</div></div>' +
+      '<div class="float-chip a">2 roti, dal, sabzi · detected</div>' +
+      '<div class="float-chip b">560 kcal · P 23 · C 80 · F 17</div></div>' +
       '<h1 class="display mt8">Snap your plate.</h1>' +
       '<div class="display faint" style="color:var(--faint);font-size:40px">Know your food.</div>' +
-      '<p class="body muted mt16">Calories and macros in seconds, a plan that fits your day, and friends who keep you honest.</p>' +
+      '<p class="body muted mt16">Calories and macros for Indian home food in seconds, and a plan that fits your day.</p>' +
+      '<div class="welcome-proof mt12"><span>✓ 3-day free Pro trial</span><span>✓ No sign-up to start</span></div>' +
       '<div class="mt24">' + E.btn("Get started — it's free", { iconRight: "arrow-right", attrs: 'data-action="guest-start"' }) + "</div>" +
       '<div class="center mt12">' + E.btn("I already have an account", { variant: "ghost", attrs: 'data-action="go" data-screen="login"' }) + "</div>";
     return E.page({ body: body });
@@ -213,9 +214,10 @@
         '<div class="picker mt20"><div class="picker-col"><button type="button" class="icon-btn flat" data-action="ob-month" data-dir="-1" aria-label="Previous month">' + E.icon("chevron-up") + '</button>' +
         '<div class="picker-ghost">' + prevM + '</div><div class="picker-val">' + E.months[m] + '</div><div class="picker-ghost">' + nextM + "</div>" +
         '<button type="button" class="icon-btn flat" data-action="ob-month" data-dir="1" aria-label="Next month">' + E.icon("chevron-down") + "</button></div>" +
-        '<div class="picker-col"><button type="button" class="icon-btn flat" data-action="ob-year" data-dir="1" aria-label="Older">' + E.icon("chevron-up") + "</button>" +
-        '<div class="picker-ghost">' + (ob.year + 1) + '</div><div class="picker-val">' + ob.year + '</div><div class="picker-ghost">' + (ob.year - 1) + "</div>" +
-        '<button type="button" class="icon-btn flat" data-action="ob-year" data-dir="-1" aria-label="Younger">' + E.icon("chevron-down") + "</button></div></div>";
+        '<div class="picker-col"><button type="button" class="icon-btn flat" data-action="ob-year" data-dir="1" aria-label="Later year">' + E.icon("chevron-up") + "</button>" +
+        '<div class="picker-ghost">' + (ob.year + 1) + '</div><input class="picker-val picker-input nums" id="ob-year-input" data-model="ob-year-input" data-testid="ob-year-input" inputmode="numeric" maxlength="4" value="' + ob.year + '" aria-label="Birth year"><div class="picker-ghost">' + (ob.year - 1) + "</div>" +
+        '<button type="button" class="icon-btn flat" data-action="ob-year" data-dir="-1" aria-label="Earlier year">' + E.icon("chevron-down") + "</button></div></div>" +
+        '<p class="caption center mt12">Tap the year to type it, like 1978.</p>';
     }
     if (step === "height") {
       const ft = E.cmToFt(ob.heightCm);
