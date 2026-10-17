@@ -262,10 +262,14 @@
     const plan = E.state.user.plan;
     const original = scan.editId ? (E.state.meals || []).find(function (m) { return m.id === scan.editId; }) : null;
     const after = plan.kcal - E.dayTotals(E.todayIso()).kcal - totals.kcal + (original && original.date === E.todayIso() ? E.mealTotals(original).kcal : 0);
-    const source = scan.editId ? "Editing a logged meal · change amount, name or kcal" : scan.source === "barcode" ? "Barcode match" : scan.source === "describe" ? "From your description" : scan.source === "list" ? "From the food list · use − + for amount" : "AI detected";
+    const source = scan.editId ? "Editing a logged meal · change amount, name, calories or macros" : scan.source === "barcode" ? "Barcode match" : scan.source === "describe" ? "From your description" : scan.source === "list" ? "From the food list · use − + for amount" : "AI detected";
     const items = scan.items.map(function (it, idx) {
       return '<div class="card mt8"><input class="plain-area" style="min-height:0;padding:8px 10px;font-weight:700" data-model="item-name" data-idx="' + idx + '" value="' + E.esc(it.name) + '" aria-label="Item name">' +
-        '<div class="caption mt8" data-scan-macros="' + idx + '">' + E.esc(it.serving) + " · P " + it.p + " · C " + it.c + " · F " + it.f + "</div>" +
+        '<button type="button" class="caption mt8" data-scan-macros="' + idx + '" data-action="toggle-item-macros" data-idx="' + idx + '" data-testid="item-' + idx + '-macros-toggle" aria-expanded="' + !!it._macroOpen + '" style="border:0;background:transparent;padding:0;color:inherit;text-align:left">' + E.esc(it.serving) + " · P " + it.p + " · C " + it.c + " · F " + it.f + (it._macroOpen ? " ▴" : " ▾") + "</button>" +
+        (it._macroOpen ? '<div class="grid3 mt8">' +
+        '<label class="caption">Protein<input data-model="item-p" data-idx="' + idx + '" data-testid="item-' + idx + '-protein-input" inputmode="decimal" value="' + it.p + '" aria-label="' + E.esc(it.name) + ' protein" style="width:100%;margin-top:4px;border:0;background:var(--canvas);border-radius:8px;padding:7px;font-weight:700"></label>' +
+        '<label class="caption">Carbs<input data-model="item-c" data-idx="' + idx + '" data-testid="item-' + idx + '-carbs-input" inputmode="decimal" value="' + it.c + '" aria-label="' + E.esc(it.name) + ' carbs" style="width:100%;margin-top:4px;border:0;background:var(--canvas);border-radius:8px;padding:7px;font-weight:700"></label>' +
+        '<label class="caption">Fats<input data-model="item-f" data-idx="' + idx + '" data-testid="item-' + idx + '-fats-input" inputmode="decimal" value="' + it.f + '" aria-label="' + E.esc(it.name) + ' fats" style="width:100%;margin-top:4px;border:0;background:var(--canvas);border-radius:8px;padding:7px;font-weight:700"></label></div>' : "") +
         '<div class="between mt8"><label class="caption">kcal <input inputmode="numeric" style="width:72px;margin-left:6px;border:0;background:var(--canvas);border-radius:8px;padding:6px 8px;font-weight:700" data-model="item-kcal" data-idx="' + idx + '" value="' + it.kcal + '" aria-label="Item calories"></label>' +
         '<div class="qty"><button type="button" data-action="scan-qty" data-dir="-1" data-idx="' + idx + '" aria-label="Less">−</button><span class="nums label">' + it.qty + '</span><button type="button" data-action="scan-qty" data-dir="1" data-idx="' + idx + '" aria-label="More">+</button></div>' +
         '<button type="button" class="icon-btn flat" data-action="scan-remove" data-idx="' + idx + '" aria-label="Remove">' + E.icon("trash-2") + "</button></div></div>";
@@ -287,9 +291,13 @@
       '<div class="mt12">' + E.field({ label: "Meal name", id: "scan-name", model: "scan-name", value: scan.name }) + "</div>" +
       '<div class="hscroll mt12">' + pills + "</div>" +
       '<div class="mt8">' + items + "</div>" +
-      '<div class="hero-card mt16"><div class="kcal-num nums" id="scan-meal-kcal">' + E.num(totals.kcal) + '</div><div class="caption" style="color:rgba(255,255,255,.7)">kcal in this meal · estimates</div>' +
+      '<div class="hero-card mt16"><div><input class="kcal-num nums" id="scan-meal-kcal" data-model="meal-kcal" data-testid="meal-calories-input" inputmode="decimal" value="' + totals.kcal + '" aria-label="Meal calories" style="width:100%;border:0;background:transparent;color:white;padding:0"><div class="caption" style="color:rgba(255,255,255,.7)">kcal in this meal · editable estimate</div></div>' +
       '<div class="caption mt8" id="scan-meal-after" style="color:rgba(255,255,255,.85)">' + (after >= 0 ? "After this meal you'll have " + E.num(after) + " kcal left." : "After this meal you'll be " + E.num(Math.abs(after)) + " kcal over today. That's allowed.") + "</div>" +
-      '<div class="mt12" id="scan-meal-macros">' + E.macros({ p: totals.p, c: totals.c, f: totals.f }, { p: Math.max(totals.p, 1), c: Math.max(totals.c, 1), f: Math.max(totals.f, 1) }) + "</div></div>" +
+      '<div class="grid3 mt12">' +
+      '<label class="caption" style="color:rgba(255,255,255,.72)">Protein<input data-model="meal-p" data-testid="meal-protein-input" inputmode="decimal" value="' + totals.p + '" aria-label="Meal protein" style="width:100%;margin-top:5px;border:0;border-radius:10px;padding:9px;font-weight:800"></label>' +
+      '<label class="caption" style="color:rgba(255,255,255,.72)">Carbs<input data-model="meal-c" data-testid="meal-carbs-input" inputmode="decimal" value="' + totals.c + '" aria-label="Meal carbs" style="width:100%;margin-top:5px;border:0;border-radius:10px;padding:9px;font-weight:800"></label>' +
+      '<label class="caption" style="color:rgba(255,255,255,.72)">Fats<input data-model="meal-f" data-testid="meal-fats-input" inputmode="decimal" value="' + totals.f + '" aria-label="Meal fats" style="width:100%;margin-top:5px;border:0;border-radius:10px;padding:9px;font-weight:800"></label></div>' +
+      '<div class="caption mt8" id="scan-meal-macros" style="color:rgba(255,255,255,.72)">Calories recalculate from macros unless you type calories yourself.</div></div>' +
       '<div class="card mt12 between"><div><div class="heading" style="font-size:15px">Save for quick add later</div><div class="caption">Shows in Eat it again</div></div>' +
       E.switch(!!scan.saveLater, 'data-action="scan-save-toggle"') + "</div>" +
       "</div>";
@@ -341,7 +349,7 @@
       '<div class="between mt8"><span>Fats</span><b class="nums">' + t.f + 'g</b></div><div class="track light mt4"><span style="width:' + Math.min(100, t.f * 2) + '%;background:var(--fats)"></span></div></div></div>' +
       (meal.items && meal.items.length > 1 ? '<div class="section-head"><h2>Ingredients</h2></div><div class="card">' + items + "</div>" : "") +
       "</div>";
-    const footer = E.btn("Edit amount or calories", { icon: "pencil", attrs: 'data-action="edit-meal" data-id="' + meal.id + '" data-testid="meal-edit"' });
+    const footer = E.btn("Edit amount or nutrition", { icon: "pencil", attrs: 'data-action="edit-meal" data-id="' + meal.id + '" data-testid="meal-edit"' });
     return E.page({ bleed: true, body: body, footer: footer });
   };
 

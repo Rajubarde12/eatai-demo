@@ -264,7 +264,10 @@
     E.state.nav.stack.push({ id: id, params: params || {}, transition: transition || "right" });
     E.render({ animate: true, transition: transition || "right" });
   }
-  const ACCOUNT_SCREENS = { communities: 1, reminders: 1, social: 1, subscription: 1, privacy: 1 };
+  const ACCOUNT_SCREENS = {
+    communities: 1, reminders: 1, social: 1, subscription: 1, privacy: 1,
+    referrals: 1, "my-professional-coach": 1, "coach-partner": 1
+  };
   function guestInApp() {
     const u = E.state.user;
     return !!(u && u.isGuest && u.onboarded);
@@ -357,6 +360,10 @@
       E.render({ animate: false, keepScroll: true });
     }
     else if (kind === "discover") { E.state.ui.chatTab = "discover"; E.render({ animate: false, keepScroll: true }); }
+    else if (kind === "community-meal") {
+      E.state.ui.communityPostMode = "meal";
+      E.render({ animate: false, keepScroll: true });
+    }
     else if (kind === "save") { if (E.state.scan) { E.state.scan.saveLater = true; E.render({ animate: false, keepScroll: true }); } }
     else if (kind === "measure") actions["save-measure"]();
   }
@@ -414,15 +421,42 @@
     const kcalEl = document.getElementById("scan-meal-kcal");
     const afterEl = document.getElementById("scan-meal-after");
     const macroEl = document.getElementById("scan-meal-macros");
-    if (kcalEl) kcalEl.textContent = E.num(totals.kcal);
+    if (kcalEl && document.activeElement !== kcalEl) kcalEl.value = totals.kcal;
     if (afterEl) afterEl.textContent = after >= 0
       ? "After this meal you'll have " + E.num(after) + " kcal left."
       : "After this meal you'll be " + E.num(Math.abs(after)) + " kcal over today. That's allowed.";
-    if (macroEl) macroEl.innerHTML = E.macros({ p: totals.p, c: totals.c, f: totals.f }, { p: Math.max(totals.p, 1), c: Math.max(totals.c, 1), f: Math.max(totals.f, 1) });
+    ["p", "c", "f"].forEach(function (field) {
+      const input = document.querySelector('[data-model="meal-' + field + '"]');
+      if (input && document.activeElement !== input) input.value = totals[field];
+    });
+    if (macroEl) {
+      const calculated = E.macroKcal(totals.p, totals.c, totals.f);
+      const mismatch = scan._manualKcal && Math.abs(totals.kcal - calculated) > Math.max(20, calculated * 0.15);
+      macroEl.textContent = mismatch ? "Calories and macros differ. You can still save." : "Calories recalculate from macros unless you type calories yourself.";
+      macroEl.style.color = mismatch ? "var(--danger)" : "rgba(255,255,255,.72)";
+    }
     (scan.items || []).forEach(function (it, idx) {
       const line = document.querySelector('[data-scan-macros="' + idx + '"]');
-      if (line) line.textContent = (it.serving || "") + " · P " + it.p + " · C " + it.c + " · F " + it.f;
+      if (line) line.textContent = (it.serving || "") + " · P " + it.p + " · C " + it.c + " · F " + it.f + (it._macroOpen ? " ▴" : " ▾");
+      ["p", "c", "f"].forEach(function (field) {
+        const input = document.querySelector('[data-model="item-' + field + '"][data-idx="' + idx + '"]');
+        if (input && document.activeElement !== input) input.value = it[field];
+      });
     });
+  }
+
+  function setScanTotal(field, requested) {
+    const scan = E.state.scan;
+    if (!scan || !isFinite(requested) || requested < 0 || requested > 100000 || !scan.items.length) return false;
+    const totals = E.mealTotals(scan);
+    const current = Number(totals[field]) || 0;
+    if (current > 0) {
+      const ratio = requested / current;
+      scan.items.forEach(function (it) { it[field] = Math.round((Number(it[field]) || 0) * ratio * 100) / 100; });
+    } else {
+      scan.items.forEach(function (it, idx) { it[field] = idx === 0 ? requested / Math.max(0.5, Number(it.qty) || 1) : 0; });
+    }
+    return true;
   }
 
   function applyModel(el) {
@@ -440,7 +474,19 @@
     else if (key === "photo-note") ui.photoNote = val;
     else if (key === "scan-fix") ui.scanFix = val;
     else if (key === "scan-name" && E.state.scan) E.state.scan.name = val;
-    else if ((key === "item-name" || key === "item-kcal") && E.state.scan) {
+    else if ((key === "meal-kcal" || key === "meal-p" || key === "meal-c" || key === "meal-f") && E.state.scan) {
+      const n = Number(String(val).replace(",", "."));
+      const field = key.replace("meal-", "");
+      if (setScanTotal(field, n)) {
+        if (field === "kcal") E.state.scan._manualKcal = true;
+        else {
+          E.state.scan._macroEdited = true;
+          E.state.scan.items.forEach(function (it) { it.kcal = E.macroKcal(Number(it.p) || 0, Number(it.c) || 0, Number(it.f) || 0); });
+        }
+        refreshScanTotals();
+      }
+    }
+    else if ((key === "item-name" || key === "item-kcal" || key === "item-p" || key === "item-c" || key === "item-f") && E.state.scan) {
       const it = (E.state.scan.items || [])[Number(el.dataset.idx)];
       if (it && key === "item-name") it.name = val;
       if (it && key === "item-kcal") {
@@ -452,6 +498,17 @@
           it.p = Math.round(it._base.p * ratio);
           it.c = Math.round(it._base.c * ratio);
           it.f = Math.round(it._base.f * ratio);
+          E.state.scan._manualKcal = true;
+          refreshScanTotals();
+        }
+      }
+      if (it && (key === "item-p" || key === "item-c" || key === "item-f")) {
+        const n = Number(String(val).replace(",", "."));
+        if (!isNaN(n) && n >= 0 && n <= 100000) {
+          const field = key.replace("item-", "");
+          it[field] = n;
+          it.kcal = E.macroKcal(Number(it.p) || 0, Number(it.c) || 0, Number(it.f) || 0);
+          E.state.scan._macroEdited = true;
           refreshScanTotals();
         }
       }
@@ -493,6 +550,9 @@
     else if (key === "mw") ui.measureWaist = val;
     else if (key === "mh") ui.measureHips = val;
     else if (key === "mc") ui.measureChest = val;
+    else if (key === "referral-code") { ui.referralCode = String(val || "").toUpperCase(); ui.referralError = ""; }
+    else if (key === "coach-qualification") ui.coachQualification = val;
+    else if (key === "partner-contact") ui.partnerContact = val;
     const live = { email: 1, password: 1, currentPassword: 1, newPassword: 1, "ob-name": 1, "chat-q": 1, "disc-q": 1, "comm-q": 1, bio: 1, "city-q": 1, "group-name": 1, "delete-ack": 1, "new-comm": 1, "diary-q": 1, "food-q": 1 };
     if (live[key]) E.render({ animate: false, keepScroll: true });
   }
@@ -521,8 +581,16 @@
     chat.time = Date.now();
     chat.unread = 0;
   }
+  function cleanScanItems(items) {
+    return (items || []).map(function (it) {
+      const clean = Object.assign({}, it);
+      delete clean._macroOpen;
+      delete clean._base;
+      return clean;
+    });
+  }
   function saveScanEntry(scan) {
-    const entry = { id: E.uid("m"), name: scan.name || "Meal", emoji: scan.emoji || "🍽️", image: scan.image, items: scan.items, mealType: scan.mealType || E.mealTypeByTime(), date: E.todayIso(), time: E.clock() };
+    const entry = { id: E.uid("m"), name: scan.name || "Meal", emoji: scan.emoji || "🍽️", image: scan.image, items: cleanScanItems(scan.items), mealType: scan.mealType || E.mealTypeByTime(), date: E.todayIso(), time: E.clock() };
     E.state.meals.push(entry);
     if (scan.saveLater) E.state.saved.unshift(JSON.parse(JSON.stringify(entry)));
     afterLog();
@@ -567,7 +635,7 @@
       if (!chatById(chat.id)) return;
       E.state.typing = null;
       const reply = /lunch|eat|dosa|meal/i.test(text) ? "Nice — I'll log mine too. We've got this." : "I'm in. Let's keep it honest this week.";
-      chat.messages.push({ id: E.uid("x"), from: "them", name: chat.type === "group" ? "Meera" : "", text: reply, at: Date.now(), status: "read" });
+      chat.messages.push({ id: E.uid("x"), from: "them", name: chat.type === "group" ? "Meera" : chat.type === "client-group" ? "Ravi · Coach" : "", text: reply, at: Date.now(), status: "read" });
       chat.preview = reply;
       chat.time = Date.now();
       E.render({ animate: false });
@@ -732,6 +800,152 @@
         return;
       }
       askEmailFor(feature);
+    },
+    "apply-referral": function () {
+      const ui = E.state.ui;
+      const r = E.state.referral;
+      const code = String(ui.referralCode || "").trim().toUpperCase();
+      const match = E.referralByCode(code);
+      if (!code) { ui.referralError = "Enter a referral or coach code."; E.render({ animate: false, keepScroll: true }); return; }
+      if (code === r.ownCode || (E.state.partner && code === E.state.partner.code)) {
+        ui.referralError = "You can't use your own code.";
+        E.render({ animate: false, keepScroll: true });
+        return;
+      }
+      if (!match) {
+        ui.referralError = "That code isn't active. Check the letters and try again.";
+        E.render({ animate: false, keepScroll: true });
+        return;
+      }
+      if (r.appliedCode) {
+        ui.referralError = "One referral code is already linked to this account.";
+        E.render({ animate: false, keepScroll: true });
+        return;
+      }
+      r.appliedCode = code;
+      r.type = match.type;
+      r.referrerName = match.name;
+      r.appliedAt = E.todayIso();
+      ui.referralCode = "";
+      ui.referralError = "";
+      if (match.type === "coach" && E.state.coachRelationship.status === "none") {
+        E.state.coachRelationship = {
+          status: "pending",
+          coach: { id: "coach-" + code.toLowerCase(), name: match.name, code: code, qualification: match.qualification, color: match.color },
+          requestedAt: E.todayIso(),
+          permissions: { meals: true, weekly: true, weight: false, water: true, photos: false, health: false }
+        };
+      }
+      toast(match.type === "coach" ? "Coach code linked. Review data access separately." : "Referral code linked");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "copy-referral": function () {
+      const code = E.state.referral.ownCode;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).catch(function () {});
+      toast("Code copied · " + code);
+    },
+    "share-referral": function () {
+      const code = E.state.referral.ownCode;
+      toast("Share: Join EatAI and use " + code);
+    },
+    "coach-permission": function (el) {
+      const key = el.dataset.key;
+      const perms = E.state.coachRelationship.permissions;
+      if (Object.prototype.hasOwnProperty.call(perms, key)) perms[key] = !perms[key];
+      toast("Sharing choice updated");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "accept-coach": function () {
+      E.state.coachRelationship.status = "active";
+      if (E.ensureCoachChats) E.ensureCoachChats();
+      toast("Coach connected. Only selected data is shared.");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "message-professional-coach": function () {
+      const chats = E.ensureCoachChats && E.ensureCoachChats();
+      if (!chats || !chats.dm) return;
+      E.state.nav.tab = "chat";
+      E.state.nav.stack = [{ id: "messages" }, { id: "thread", params: { id: chats.dm.id } }];
+      E.render({ animate: true, transition: "right" });
+    },
+    "open-professional-group": function () {
+      const chats = E.ensureCoachChats && E.ensureCoachChats();
+      if (!chats || !chats.group) return;
+      E.state.nav.tab = "chat";
+      E.state.nav.stack = [{ id: "messages" }, { id: "thread", params: { id: chats.group.id } }];
+      E.render({ animate: true, transition: "right" });
+    },
+    "rejoin-professional-group": function () {
+      E.state.coachRelationship.clientGroupLeft = false;
+      const chats = E.ensureCoachChats && E.ensureCoachChats();
+      if (!chats || !chats.group) return;
+      E.state.nav.tab = "chat";
+      E.state.nav.stack = [{ id: "messages" }, { id: "thread", params: { id: chats.group.id } }];
+      toast("Client group rejoined");
+      E.render({ animate: true, transition: "right" });
+    },
+    "decline-coach": function () {
+      E.state.coachRelationship.status = "none";
+      E.state.coachRelationship.coach = null;
+      toast("Coach request declined. Referral attribution is unchanged.");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "ask-remove-coach": function () {
+      ask({ title: "Remove Professional Coach?", message: "Their data access stops now. Referral attribution and any valid purchase commission stay unchanged.", ok: "Remove access", danger: true, action: "remove-coach" });
+    },
+    "remove-coach": function () {
+      E.state.coachRelationship.status = "none";
+      E.state.coachRelationship.coach = null;
+      (E.state.chats || []).forEach(function (chat) {
+        if (chat.professional) chat.readOnly = true;
+      });
+      toast("Coach access removed");
+      E.state.nav.stack.pop();
+      E.render({ animate: true, transition: "fade" });
+    },
+    "register-coach-partner": async function () {
+      const q = String(E.state.ui.coachQualification || "").trim();
+      if (q.length < 4) { toast("Add your professional qualification", "err"); return; }
+      E.state.ui.busy = "coach-apply";
+      E.render({ animate: false, keepScroll: true });
+      await sleep(E.state.flags.slowNet ? 1400 : 500);
+      const first = E.first(E.state.user.name).replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "COACH";
+      E.state.partner.registered = true;
+      E.state.partner.status = "verified";
+      E.state.partner.code = "COACH-" + first;
+      E.state.partner.qualification = q;
+      E.state.partner.payoutReady = false;
+      E.state.ui.busy = null;
+      toast("Demo Coach Partner approved");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "copy-partner-code": function () {
+      const code = E.state.partner.code;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).catch(function () {});
+      toast("Partner code copied · " + code);
+    },
+    "share-partner-code": function () {
+      toast("Share this code manually · " + E.state.partner.code);
+    },
+    "partner-invite-customer": async function () {
+      const raw = String(E.state.ui.partnerContact || "").trim();
+      const email = E.validEmail(raw);
+      const eatId = /^EA-[A-Z0-9]{4,10}$/i.test(raw);
+      if (!email && !eatId) { toast("Enter a verified email or EatAI ID like EA-482731", "err"); return; }
+      if ((E.state.partner.customers || []).some(function (x) { return x.contact.toLowerCase() === raw.toLowerCase(); })) {
+        toast("This customer already has a request", "err");
+        return;
+      }
+      E.state.ui.busy = "partner-invite";
+      E.render({ animate: false, keepScroll: true });
+      await sleep(E.state.flags.slowNet ? 1400 : 500);
+      const local = (raw.split("@")[0] || raw).replace(/[^A-Za-z0-9]/g, "");
+      const masked = local.length > 1 ? local[0].toUpperCase() + "•••" + local.slice(-1).toLowerCase() : "Customer";
+      E.state.partner.customers.unshift({ id: E.uid("pc"), name: masked, contact: raw, status: "pending", plan: "", joinedAt: E.todayIso() });
+      E.state.ui.partnerContact = "";
+      E.state.ui.busy = null;
+      toast("Request sent. No data or commission yet.");
+      E.render({ animate: false, keepScroll: true });
     },
     "send-claim-code": async function () {
       const ui = E.state.ui;
@@ -1196,6 +1410,12 @@
       askEmailFor({ type: "paywall" });
     },
     "retry-scan": function () { if (lastScan) runScan(lastScan); },
+    "toggle-item-macros": function (el) {
+      const it = E.state.scan.items[Number(el.dataset.idx)];
+      if (!it) return;
+      it._macroOpen = !it._macroOpen;
+      E.render({ animate: false, keepScroll: true });
+    },
     "scan-qty": function (el) {
       const it = E.state.scan.items[Number(el.dataset.idx)];
       if (!it) return;
@@ -1277,7 +1497,7 @@
       if (!meal) { E.state.scan = null; pop(); return; }
       if (!scan.items.length) { toast("Keep at least one food, or delete the meal", "err"); return; }
       meal.name = scan.name || meal.name;
-      meal.items = scan.items;
+      meal.items = cleanScanItems(scan.items);
       meal.mealType = scan.mealType || meal.mealType;
       if (scan.saveLater && !(E.state.saved || []).some(function (s) { return s.name === meal.name; })) E.state.saved.unshift(JSON.parse(JSON.stringify(meal)));
       E.state.scan = null;
@@ -1497,6 +1717,16 @@
       push("thread", { id: el.dataset.id }, "right");
     },
     "open-group": function (el) { push("group-info", { id: el.dataset.id }, "right"); },
+    "leave-client-group": function (el) {
+      ask({ title: "Leave this client group?", message: "You will stop receiving group messages. Your 1:1 Professional Coach connection stays active.", ok: "Leave group", danger: true, action: "do-leave-client-group", id: el.dataset.id });
+    },
+    "do-leave-client-group": function (cfn) {
+      E.state.chats = (E.state.chats || []).filter(function (chat) { return chat.id !== cfn.id; });
+      if (E.state.coachRelationship && cfn.id.indexOf("coach-group-") === 0) E.state.coachRelationship.clientGroupLeft = true;
+      E.state.nav.stack = [{ id: "messages" }];
+      toast("You left the client group");
+      E.render({ animate: true, transition: "fade" });
+    },
     noop: function () {},
     send: function () {
       const chat = chatById(E.currentParams().id);
@@ -1808,6 +2038,33 @@
       if (i >= 0) picks.splice(i, 1); else picks.push(el.dataset.id);
       E.render({ animate: false, keepScroll: true });
     },
+    "pick-client-customer": function (el) {
+      const picks = E.state.ui.groupPicks;
+      const i = picks.indexOf(el.dataset.id);
+      if (i >= 0) picks.splice(i, 1); else picks.push(el.dataset.id);
+      E.render({ animate: false, keepScroll: true });
+    },
+    "create-client-group": function () {
+      const name = String(E.state.ui.groupName || "").trim();
+      const picks = E.state.ui.groupPicks || [];
+      if (!name || !picks.length) { toast("Add a group name and at least one customer", "err"); return; }
+      const customers = (E.state.partner.customers || []).filter(function (x) { return picks.indexOf(x.id) >= 0; });
+      const members = [E.state.user.name + " · Coach"].concat(customers.map(function (x) { return x.name; }));
+      const chat = {
+        id: E.uid("clientgroup"), type: "client-group", coachId: "self", professional: true, privateClientGroup: true,
+        name: name, color: "#E4F7C8", initials: E.initials(name), members: members,
+        preview: "Private client group created", time: Date.now(), unread: 0,
+        messages: [{ id: E.uid("x"), from: "them", name: "EatAI", text: "Private client group created. Members only see messages intentionally shared here.", at: Date.now(), status: "read" }]
+      };
+      E.state.chats.unshift(chat);
+      E.state.ui.groupName = "";
+      E.state.ui.groupPicks = [];
+      E.state.modal = null;
+      E.state.nav.tab = "chat";
+      E.state.nav.stack = [{ id: "messages" }, { id: "thread", params: { id: chat.id } }];
+      toast("Private client group created");
+      E.render({ animate: true, transition: "right" });
+    },
     "create-group": function () {
       const name = (E.state.ui.groupName || "").trim();
       if (!name || E.state.ui.groupPicks.length < 2) { toast("Add a name and at least 2 people", "err"); return; }
@@ -1825,18 +2082,41 @@
       if (!E.isPro()) { openModal("paywall"); return; }
       openModal("create-community");
     },
+    "community-create-type": function (el) {
+      E.state.ui.newCommunityType = el.dataset.value || "public";
+      E.render({ animate: false, keepScroll: true });
+    },
     "submit-community": function () {
       const name = (E.state.ui.newComm || "").trim();
       if (!name) { toast("Add a community name", "err"); return; }
-      const c = { id: E.uid("cm"), name: name, city: E.state.ui.newCity || "Bengaluru", members: 1, admin: true, joined: true, hue: 100, description: E.state.ui.newAbout || "A new demo community.", rules: "Be kind. No dating pitches.", memberList: [{ id: "me", name: "You", role: "admin" }], pending: [], posts: [{ id: E.uid("p"), author: "You", text: "Community created. This feed stays on your device.", time: "now", likes: 0, liked: false, replies: [] }] };
+      const coachType = E.state.ui.newCommunityType === "coach" && E.state.partner && E.state.partner.registered;
+      const c = {
+        id: E.uid("cm"), name: name, city: E.state.ui.newCity || "Bengaluru", members: 1, admin: true, joined: true,
+        hue: coachType ? 205 : 100, type: coachType ? "coach" : "public", visibility: "public",
+        description: E.state.ui.newAbout || "A new demo community.",
+        rules: coachType ? "No crash diets, diagnosis, body shaming, or medicine advice." : "Be kind. No dating pitches.",
+        coach: coachType ? { id: "coach-self", name: E.state.user.name, code: E.state.partner.code, qualification: E.state.partner.qualification, color: E.state.user.color, verified: true } : null,
+        channels: coachType ? [{ id: "all", label: "All" }, { id: "announcements", label: "Announcements" }, { id: "meals", label: "Meals" }, { id: "questions", label: "Questions" }, { id: "wins", label: "Weekly wins" }] : [],
+        challenge: coachType ? { id: E.uid("challenge"), title: "7-Day Meal Logging", description: "One honest meal a day. No weigh-in competition.", joined: true, checked: 0, days: 7, members: 1 } : null,
+        event: coachType ? { id: E.uid("event"), title: "Community Q&A", when: "Sun · 6:00 PM", mode: "Live in community", going: true, attendees: 1 } : null,
+        memberList: [{ id: "me", name: "You", role: coachType ? "verified coach" : "admin" }], pending: [],
+        posts: [{ id: E.uid("p"), author: "You", text: "Community created. This feed stays on your device.", time: "now", likes: 0, liked: false, replies: [], channel: coachType ? "announcements" : "all", pinned: coachType }]
+      };
       E.state.communities.mine.unshift(c);
       E.state.modal = null;
       E.state.ui.communityTab = "mine";
+      E.state.ui.communityChannel = "all";
+      E.state.ui.commView = "feed";
+      E.state.ui.newCommunityType = "public";
       toast("Community created");
       push("community", { id: c.id, list: "mine" }, "right");
     },
     "comm-tab": function (el) { E.state.ui.communityTab = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
-    "open-community": function (el) { push("community", { id: el.dataset.id, list: el.dataset.list || "mine" }, "right"); },
+    "open-community": function (el) {
+      E.state.ui.commView = "feed";
+      E.state.ui.communityChannel = "all";
+      push("community", { id: el.dataset.id, list: el.dataset.list || "mine" }, "right");
+    },
     "comm-vis": function (el) {
       const c = (E.state.communities.mine || []).find(function (x) { return x.id === E.currentParams().id; });
       if (c) c.visibility = el.dataset.value;
@@ -1853,6 +2133,81 @@
       E.render({ animate: false, keepScroll: true });
     },
     "comm-view": function (el) { E.state.ui.commView = el.dataset.value; E.render({ animate: false, keepScroll: true }); },
+    "community-channel": function (el) {
+      E.state.ui.communityChannel = el.dataset.value || "all";
+      E.render({ animate: false, keepScroll: true });
+    },
+    "community-post-mode": function (el) {
+      const mode = el.dataset.value || "text";
+      if (mode === "meal" && !E.isPro()) {
+        E.state.ui.pendingGate = "community-meal";
+        openModal("paywall");
+        return;
+      }
+      E.state.ui.communityPostMode = mode;
+      E.render({ animate: false, keepScroll: true });
+    },
+    "community-photo-pick": function (el) {
+      E.state.ui.communityPhotoPick = el.dataset.src || "";
+      E.render({ animate: false, keepScroll: true });
+    },
+    "community-meal-pick": function (el) {
+      E.state.ui.communityMealPick = el.dataset.id || "";
+      E.render({ animate: false, keepScroll: true });
+    },
+    "community-challenge": function (el) {
+      const c = E.communityById(el.dataset.cid);
+      if (!c || !c.challenge) return;
+      if (!c.joined) { toast("Join the community first", "err"); return; }
+      if (!c.challenge.joined) {
+        c.challenge.joined = true;
+        c.challenge.members += 1;
+        c.challenge.checked = 0;
+        toast("Challenge joined. One honest meal a day.");
+      } else if (c.challenge.lastCheck === E.todayIso()) {
+        toast("Today's check-in is already counted");
+      } else {
+        c.challenge.lastCheck = E.todayIso();
+        c.challenge.checked = Math.min(c.challenge.days, (c.challenge.checked || 0) + 1);
+        toast("Today checked in · " + c.challenge.checked + "/" + c.challenge.days);
+      }
+      E.render({ animate: false, keepScroll: true });
+    },
+    "community-rsvp": function (el) {
+      const c = E.communityById(el.dataset.cid);
+      if (!c || !c.event) return;
+      c.event.going = !c.event.going;
+      c.event.attendees = Math.max(0, c.event.attendees + (c.event.going ? 1 : -1));
+      toast(c.event.going ? "RSVP saved" : "RSVP removed");
+      E.render({ animate: false, keepScroll: true });
+    },
+    "community-coach-connect": function (el) {
+      const c = E.communityById(el.dataset.cid);
+      if (!c || !c.coach) return;
+      if (E.state.user.ageBlocked) {
+        push("my-professional-coach", {}, "right");
+        return;
+      }
+      const rel = E.state.coachRelationship;
+      if (rel.status === "active" && rel.coach && rel.coach.id === c.coach.id) {
+        const chats = E.ensureCoachChats && E.ensureCoachChats();
+        if (chats && chats.dm) {
+          E.state.nav.tab = "chat";
+          E.state.nav.stack = [{ id: "messages" }, { id: "thread", params: { id: chats.dm.id } }];
+          E.render({ animate: true, transition: "right" });
+        }
+        return;
+      }
+      if (!(rel.status === "pending" && rel.coach && rel.coach.id === c.coach.id)) {
+        E.state.coachRelationship = {
+          status: "pending",
+          coach: Object.assign({}, c.coach),
+          requestedAt: E.todayIso(),
+          permissions: { meals: true, weekly: true, weight: false, water: true, photos: false, health: false }
+        };
+      }
+      push("my-professional-coach", {}, "right");
+    },
     "toggle-near": function () { E.state.ui.nearMe = !E.state.ui.nearMe; E.render({ animate: false, keepScroll: true }); },
     "join-community": function (el) {
       const c = E.communityById(el.dataset.cid);
@@ -1923,13 +2278,35 @@
     },
     "community-post": function (el) {
       const text = (E.state.ui.postDraft || "").trim();
-      if (!text) { toast("Write something first", "err"); return; }
       const c = E.communityById(el.dataset.cid);
       if (!c || !c.joined) { toast("Join to post", "err"); return; }
+      const mode = E.state.ui.communityPostMode || "text";
+      let image = "";
+      let mealSnapshot = null;
+      if (mode === "photo") {
+        image = E.state.ui.communityPhotoPick || "";
+        if (!image) { toast("Choose a photo first", "err"); return; }
+      } else if (mode === "meal") {
+        if (!E.isPro()) {
+          E.state.ui.pendingGate = "community-meal";
+          openModal("paywall");
+          return;
+        }
+        const meal = (E.state.meals || []).find(function (m) { return m.id === E.state.ui.communityMealPick; });
+        if (!meal) { toast("Choose one food log first", "err"); return; }
+        const totals = E.mealTotals(meal);
+        mealSnapshot = { name: meal.name, image: meal.image || "", emoji: meal.emoji || "🍽️", kcal: totals.kcal, p: totals.p, c: totals.c, f: totals.f };
+      } else if (!text) {
+        toast("Write something first", "err");
+        return;
+      }
       c.posts = c.posts || [];
-      c.posts.unshift({ id: E.uid("p"), author: "You", text: text, time: "now", likes: 0, liked: false, replies: [] });
+      c.posts.unshift({ id: E.uid("p"), author: "You", text: text, image: image, meal: mealSnapshot, time: "now", likes: 0, liked: false, replies: [], channel: E.state.ui.communityChannel || "all", pinned: false });
       E.state.ui.postDraft = "";
-      toast("Posted");
+      E.state.ui.communityPostMode = "text";
+      E.state.ui.communityPhotoPick = "";
+      E.state.ui.communityMealPick = "";
+      toast(mode === "photo" ? "Photo posted" : mode === "meal" ? "Food log posted" : "Posted");
       E.render({ animate: false, keepScroll: true });
     },
     "approve-member": function (el) {
@@ -2042,10 +2419,15 @@
       const amount = E.state.ui.offerOff ? Math.round(base * (1 - E.state.ui.offerOff)) : base;
       E.state.pendingCheckout = null;
       E.state.payments.unshift({ date: E.todayIso(), amount: amount, status: "Paid", plan: plan });
+      const referralResult = E.recordReferralPurchase ? E.recordReferralPurchase(amount, plan) : null;
       E.state.ui.busy = null;
       E.state.modal = null;
       const label = plan === "yearly" ? "Yearly" : plan === "sixmonth" ? "6-month" : "Monthly";
-      toast(label + " Pro is on. You were not charged.");
+      toast(referralResult && referralResult.type === "coach"
+        ? label + " Pro is on. Referral confirmed for " + referralResult.name + "."
+        : referralResult && referralResult.type === "user"
+          ? label + " Pro is on. " + referralResult.name + " earned " + referralResult.rewardDays + " Pro days."
+          : label + " Pro is on. You were not charged.");
       if (E.state.ui.pendingGate) resumeGate();
       else ask({ title: "You're on Pro", message: label + " plan is active via " + (razor ? "Razorpay" : "the store") + ". You were not charged.", ok: "Nice", hideCancel: true, action: "noop-render" });
     },

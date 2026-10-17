@@ -22,6 +22,7 @@
       return E.page({ tab: true, body: E.empty({ emoji: "🌱", title: "Chat opens at 18", sub: "You can still track meals, water, and your plan. Discovery stays off — this isn't a dead end.", button: E.btn("Back to Home", { attrs: 'data-action="tab" data-tab="home"' }) }) });
     }
     if (!u.chatReady) return chatSetup();
+    if (E.state.coachRelationship && E.state.coachRelationship.status === "active" && E.ensureCoachChats) E.ensureCoachChats();
     const gate = E.gate();
     if (gate) return E.page({ tab: true, body: '<div class="hero">Messages</div>' + gate });
     const tab = E.state.ui.chatTab || "chats";
@@ -32,10 +33,18 @@
       E.iconBtn("users", 'data-action="open-modal" data-modal="new-group" aria-label="New group"', "flat") + "</div></div>";
     let inner = "";
     if (tab === "chats") {
-      let chats = E.state.chats || [];
+      const professional = (E.state.chats || []).filter(function (c) { return c.professional; });
+      let chats = (E.state.chats || []).filter(function (c) { return !c.professional; });
       if (q) chats = chats.filter(function (c) { return (c.name + c.preview).toLowerCase().indexOf(q) >= 0; });
       const banner = reqN ? '<button type="button" class="banner mt12" data-action="chat-tab" data-value="requests"><span>✉️</span><span class="grow"><b>' + reqN + ' chat request' + (reqN > 1 ? "s" : "") + '</b><div class="caption">Accept to start, or decline quietly.</div></span></button>' : "";
       const search = (E.state.chats || []).length >= 4 ? '<div class="mt12">' + E.field({ id: "chat-q", model: "chat-q", placeholder: "Search chats", value: E.state.ui.chatQuery, icon: "search" }) + "</div>" : "";
+      const professionalRows = professional.length ? '<div class="overline mt16">Professional coaching</div><div class="list-card mt8">' + professional.map(function (c) {
+        const label = c.type === "client-group" ? "Private client group" : "1:1 Professional Coach";
+        return '<button type="button" class="nav-row" data-action="open-thread" data-id="' + c.id + '" data-testid="' + (c.type === "client-group" ? "open-client-group" : "open-coach-chat") + '">' +
+          E.avatar({ name: c.name, initials: c.initials, color: c.color, size: 44 }) +
+          '<span class="grow"><span class="heading" style="font-size:15px">' + E.esc(c.name) + ' <span class="verified-mark">✓</span></span><span class="caption">' + label + ' · ' + E.esc(c.preview) + "</span></span>" +
+          (c.unread ? '<em class="badge" style="position:static">' + c.unread + "</em>" : E.icon("chevron-right")) + "</button>";
+      }).join("") + "</div>" : "";
       const rows = chats.map(function (c) {
         return '<button type="button" class="chat-row" data-action="open-thread" data-id="' + c.id + '">' +
           E.avatar({ name: c.name, initials: c.initials, color: c.color, size: 48 }) +
@@ -44,7 +53,7 @@
           (c.unread ? '<em class="badge" style="position:static;margin-top:6px">' + c.unread + "</em>" : c.pending === "outgoing" ? '<span class="caption">⏳</span>' : c.blocked ? '<span class="caption">🚫</span>' : '<span class="ticks">' + E.icon("check-check") + "</span>") +
           "</span></button>";
       }).join("");
-      inner = search + banner + (rows || E.empty({ emoji: "💬", title: "No chats yet", sub: "Find a training partner in Discover.", button: E.btn("Discover people", { size: "md", attrs: 'data-action="chat-tab" data-value="discover"' }) }));
+      inner = search + banner + professionalRows + (professionalRows && rows ? '<div class="overline mt20">Other chats</div>' : "") + (rows || (professionalRows ? "" : E.empty({ emoji: "💬", title: "No chats yet", sub: "Find a training partner in Discover.", button: E.btn("Discover people", { size: "md", attrs: 'data-action="chat-tab" data-value="discover"' }) })));
     } else if (tab === "requests") {
       inner = (E.state.requests || []).map(function (r) {
         return '<div class="card mt12"><div class="row gap12">' + E.avatar({ name: r.name, color: r.color, initials: r.initials, size: 48 }) +
@@ -118,22 +127,31 @@
     const id = (E.currentParams() || {}).id;
     const chat = (E.state.chats || []).find(function (c) { return c.id === id; });
     if (!chat) return E.page({ top: E.topTitle("Chat"), body: E.empty({ emoji: "💬", title: "Chat not found" }) });
-    const sub = chat.type === "group" ? (chat.members || []).length + " members" : (chat.pending === "outgoing" ? "Request sent" : chat.online ? "Online" : "Last seen recently");
-    const top = E.backBtn() + '<button type="button" class="row gap8 grow" style="border:0;background:transparent;text-align:left;color:inherit" data-action="' + (chat.type === "group" ? "open-group" : "noop") + '" data-id="' + chat.id + '">' +
+    const isGroup = chat.type === "group" || chat.type === "client-group";
+    const sub = chat.type === "client-group" ? "Private client group · " + (chat.members || []).length + " members" : chat.type === "professional-coach" ? "Professional Coach · private" : isGroup ? (chat.members || []).length + " members" : (chat.pending === "outgoing" ? "Request sent" : chat.online ? "Online" : "Last seen recently");
+    const top = E.backBtn() + '<button type="button" class="row gap8 grow" style="border:0;background:transparent;text-align:left;color:inherit" data-action="' + (isGroup ? "open-group" : "noop") + '" data-id="' + chat.id + '">' +
       E.avatar({ name: chat.name, initials: chat.initials, color: chat.color, size: 36 }) +
-      '<span class="grow"><span class="heading" style="font-size:16px">' + E.esc(chat.name) + '</span><span class="caption" style="display:block">' + (E.state.typing === chat.id ? "typing…" : sub) + "</span></span></button>" +
-      (chat.type === "group" ? "" : E.iconBtn("ellipsis-vertical", 'data-action="chat-more" data-testid="chat-more" aria-label="Report or block"', "flat"));
+      '<span class="grow"><span class="heading" style="font-size:16px">' + E.esc(chat.name) + (chat.professional ? ' <span class="verified-mark">✓</span>' : "") + '</span><span class="caption" style="display:block">' + (E.state.typing === chat.id ? "typing…" : sub) + "</span></span></button>" +
+      (isGroup ? "" : E.iconBtn("ellipsis-vertical", 'data-action="chat-more" data-testid="chat-more" aria-label="Report or block"', "flat"));
     let banner = "";
     let locked = false;
-    if (chat.pending === "incoming") {
+    if (chat.readOnly) {
+      locked = true;
+      banner = '<div class="banner amber mt8"><span>🔒</span><span><b>Coach access ended</b><div class="caption">Messages stay here, but this thread is read-only.</div></span></div>';
+    } else if (chat.type === "client-group") {
+      banner = '<div class="banner mt8" data-testid="client-group-privacy"><span>👥</span><span><b>Private client group</b><div class="caption">Members see messages you send. Your diary, weight and photos are never attached automatically.</div></span></div>';
+    } else if (chat.type === "professional-coach") {
+      banner = '<div class="banner mt8"><span>🔒</span><span><b>Private coach chat</b><div class="caption">Share a meal or report only when you choose.</div></span></div>';
+    }
+    if (!locked && chat.pending === "incoming") {
       locked = true;
       banner = '<div class="card mt8"><div class="heading" style="font-size:15px">Accept this chat?</div><p class="caption">They can\'t message freely until you do.</p><div class="grid2 mt12">' +
         E.btn("Decline", { variant: "secondary", size: "md", attrs: 'data-action="decline-thread"' }) +
         E.btn("Accept", { size: "md", attrs: 'data-action="accept-thread"' }) + "</div></div>";
-    } else if (chat.pending === "outgoing") {
+    } else if (!locked && chat.pending === "outgoing") {
       locked = true;
       banner = '<div class="banner mt8"><span>⏳</span><span><b>Request sent</b><div class="caption">You\'ll be able to chat when they accept.</div></span></div>';
-    } else if (chat.blocked) {
+    } else if (!locked && chat.blocked) {
       locked = true;
       banner = '<div class="banner amber mt8"><span>🚫</span><span class="grow"><b>You blocked ' + E.esc(chat.name) + '</b><div class="caption">They can\'t message you. Tapped by mistake?</div></span>' +
         E.btn("Unblock", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="unblock-chat" data-testid="chat-unblock"' }) + "</div>";
@@ -176,7 +194,11 @@
     const members = (chat.members || []).map(function (n) {
       return '<div class="nav-row"><span class="avatar" style="width:36px;height:36px">' + E.esc(E.initials(n)) + '</span><span class="heading" style="font-size:15px">' + E.esc(n) + "</span></div>";
     }).join("");
-    return E.page({ top: E.topTitle("Group"), body: '<div class="center mt8">' + E.avatar({ name: chat.name, color: chat.color, size: 72 }) + '<div class="title mt12">' + E.esc(chat.name) + "</div></div><div class=\"list-card mt16\">" + members + "</div>" });
+    const privacy = chat.type === "client-group"
+      ? '<div class="banner mt16"><span>🔒</span><span><b>Private client group</b><span class="caption" style="display:block">Only messages you send are visible here. Personal diary permissions belong to your 1:1 coach relationship.</span></span></div>'
+      : "";
+    return E.page({ top: E.topTitle(chat.type === "client-group" ? "Client group" : "Group"), body: '<div class="center mt8">' + E.avatar({ name: chat.name, color: chat.color, size: 72 }) + '<div class="title mt12">' + E.esc(chat.name) + (chat.professional ? ' <span class="verified-mark">✓</span>' : "") + '</div><div class="caption mt4">' + (chat.type === "client-group" ? "Managed by your Professional Coach" : (chat.members || []).length + " members") + "</div></div>" + privacy + '<div class="overline mt20">Members</div><div class="list-card mt8">' + members + "</div>" +
+      (chat.type === "client-group" ? '<div class="mt16">' + E.btn("Leave client group", { variant: "secondary", attrs: 'data-action="leave-client-group" data-id="' + chat.id + '" data-testid="leave-client-group"' }) + "</div>" : "") });
   };
 
   E.screens["user-profile"] = function () {
@@ -202,12 +224,15 @@
     if (tab === "discover" && E.state.ui.nearMe) list = list.filter(function (c) { return city && c.city.toLowerCase() === city; });
     const gate = E.gate();
     const cards = list.map(function (c) {
+      const coach = c.type === "coach";
       return '<button type="button" class="card mt12" style="width:100%;text-align:left;border:0;color:inherit" data-action="open-community" data-id="' + c.id + '" data-list="' + tab + '">' +
-        '<div class="photo" style="height:92px;border-radius:16px;background:hsl(' + c.hue + ',45%,78%)"><span style="font-size:32px">🌍</span></div>' +
-        '<div class="heading mt12" style="font-size:16px">' + E.esc(c.name) + '</div><div class="caption">' + c.members + " members · " + E.esc(c.city) + (c.joined ? "" : " · Join to post") + "</div></button>";
+        '<div class="community-cover" style="background:hsl(' + c.hue + ',45%,78%)"><span>' + (coach ? "🎓" : "🌍") + '</span><em>' + (coach ? "Verified Coach Community" : c.visibility === "private" ? "Private Community" : "Public Community") + "</em></div>" +
+        '<div class="heading mt12" style="font-size:16px">' + E.esc(c.name) + (coach ? ' <span class="verified-mark">✓</span>' : "") + '</div><div class="caption">' + c.members + " members · " + E.esc(c.city) + (c.joined ? "" : " · Join to post") + "</div>" +
+        (coach && c.coach ? '<div class="row gap8 mt8">' + E.avatar({ name: c.coach.name, color: c.coach.color, size: 28 }) + '<span class="caption">Hosted by ' + E.esc(c.coach.name) + " · challenges & Q&A</span></div>" : "") + "</button>";
     }).join("");
     const near = tab === "discover" ? '<div class="mt12"><button type="button" class="chip ' + (E.state.ui.nearMe ? "on" : "") + '" data-action="toggle-near">Near me</button></div>' : "";
-    const body = '<div class="mt4">' + E.segmented([{ id: "mine", label: "Mine" }, { id: "discover", label: "Discover" }], tab, "comm-tab") + "</div>" +
+    const body = '<div class="community-levels"><div><b>Communities</b><span>Public interests</span></div><i>→</i><div><b>Coach</b><span>Expert-led</span></div><i>→</i><div><b>Client group</b><span>Private chat</span></div></div>' +
+      '<div class="mt12">' + E.segmented([{ id: "mine", label: "Mine" }, { id: "discover", label: "Discover" }], tab, "comm-tab") + "</div>" +
       (tab === "discover" ? '<div class="mt12">' + E.field({ id: "cq", model: "comm-q", placeholder: "Search by name or city", value: E.state.ui.communityQuery, icon: "search" }) + "</div>" + near : "") +
       (gate || cards || E.empty({ emoji: "🌍", title: E.state.ui.nearMe ? "Nothing in your city yet" : "No communities yet", sub: "Discover a group, or create one on Pro." }));
     return E.page({
@@ -222,21 +247,30 @@
     if (!c || c.archived) return E.page({ top: E.topTitle("Community"), body: E.empty({ emoji: "🌍", title: "Community not found" }) });
     const view = E.state.ui.commView || "feed";
     const joined = !!c.joined;
-    const posts = (c.posts || []).filter(function (post) { return !post.hidden; }).map(function (post) {
+    const channel = E.state.ui.communityChannel || "all";
+    const visiblePosts = (c.posts || []).filter(function (post) {
+      return !post.hidden && (channel === "all" || post.channel === channel);
+    });
+    const posts = visiblePosts.map(function (post) {
       const open = E.state.ui.openPost === post.id;
       const n = (post.replies || []).length;
       const replies = (post.replies || []).map(function (r) {
         return '<div class="card mt8" style="padding:10px 12px"><b>' + E.esc(r.author) + '</b><div class="caption mt4">' + E.esc(r.text) + "</div></div>";
       }).join("");
       const mine = post.author === "You";
-      return '<div class="card mt12"><div class="between"><span class="heading" style="font-size:15px">' + E.esc(post.author) + '</span><span class="caption">' + E.esc(post.time || "") + '</span></div><p class="body mt8">' + E.esc(post.text) + '</p>' +
+      const photoPost = post.image ? '<img class="community-post-image mt12" alt="Community post" src="' + E.esc(post.image) + '">' : "";
+      const mealPost = post.meal ? '<div class="community-food-card mt12"><div class="community-food-thumb">' + (post.meal.image ? '<img alt="" src="' + E.esc(post.meal.image) + '">' : E.esc(post.meal.emoji || "🍽️")) + '</div><div class="grow"><span class="caption">Shared food log</span><b>' + E.esc(post.meal.name) + '</b><span class="caption">' + E.num(post.meal.kcal) + " kcal · P " + post.meal.p + " · C " + post.meal.c + " · F " + post.meal.f + "</span></div></div>" : "";
+      return '<div class="card mt12">' + (post.pinned ? '<div class="overline" style="color:var(--success)">📌 Pinned announcement</div>' : "") +
+        '<div class="between' + (post.pinned ? " mt8" : "") + '"><span class="heading" style="font-size:15px">' + E.esc(post.author) + '</span><span class="caption">' + E.esc(post.time || "") + "</span></div>" +
+        (post.text ? '<p class="body mt8">' + E.esc(post.text) + "</p>" : "") + photoPost + mealPost +
+        (c.type === "coach" && post.channel && post.channel !== "all" ? '<span class="topic-tag">#' + E.esc(post.channel) + "</span>" : "") +
         '<div class="row gap12 mt8"><button type="button" class="chip ' + (post.liked ? "on" : "") + '" data-action="like-post" data-id="' + post.id + '" data-cid="' + c.id + '" aria-label="Like">♥ ' + (post.likes || 0) + '</button>' +
         '<button type="button" class="chip" data-action="toggle-replies" data-id="' + post.id + '">💬 ' + (n ? n + (n === 1 ? " reply" : " replies") : "Reply") + "</button>" +
         (mine ? "" : '<button type="button" class="chip" style="margin-left:auto" data-action="report-post" data-id="' + post.id + '" data-cid="' + c.id + '" data-testid="post-report" aria-label="Report post">' + E.icon("flag") + "</button>") + "</div>" +
         (open ? replies + (joined ? '<div class="mt8">' + E.field({ id: "reply", model: "reply-draft", value: E.state.ui.replyDraft, placeholder: "Write a reply" }) + "</div>" +
           '<div class="mt8">' + E.btn("Reply", { size: "sm", attrs: 'data-action="send-reply" data-id="' + post.id + '" data-cid="' + c.id + '"' }) + "</div>" : "") : "") +
         "</div>";
-    }).join("") || E.empty({ emoji: "✨", title: "No posts yet", sub: joined ? "Say hello — share a win or a question." : "Join to see and write posts." });
+    }).join("") || E.empty({ emoji: "✨", title: channel === "all" ? "No posts yet" : "Nothing in this channel yet", sub: joined ? "Say hello — share a win or a question." : "Join to see and write posts." });
     const members = (c.pending || []).map(function (m) {
       return '<div class="between card mt12"><span class="grow"><b>' + E.esc(m.name) + '</b><div class="caption">Join request</div></span>' +
         (c.admin ? E.btn("Approve", { size: "sm", block: false, attrs: 'data-action="approve-member" data-id="' + m.id + '" data-cid="' + c.id + '"' }) +
@@ -245,10 +279,41 @@
       return '<div class="between card mt12"><span class="grow"><b>' + E.esc(m.name) + '</b><div class="caption">' + E.esc(m.role || "member") + "</div></span>" +
         (c.admin && m.id !== "me" ? E.btn("Remove", { size: "sm", variant: "secondary", block: false, attrs: 'data-action="remove-member" data-id="' + m.id + '" data-cid="' + c.id + '"' }) : "") + "</div>";
     }).join("") || E.empty({ emoji: "👥", title: "No members yet" });
-    const about = '<div class="card mt12"><b>About</b><p class="body muted mt8">' + E.esc(c.description || "No description yet.") + '</p><p class="caption mt8">' + E.esc(c.city || "") + "</p></div>" +
+    const coachAbout = c.type === "coach" && c.coach ? '<div class="card mt12"><div class="row gap12">' + E.avatar({ name: c.coach.name, color: c.coach.color, size: 50 }) +
+      '<div class="grow"><b>' + E.esc(c.coach.name) + ' <span class="verified-mark">✓</span></b><div class="caption">' + E.esc(c.coach.qualification) + '</div></div></div><p class="caption mt12">Verified means identity and qualification were reviewed. It is not a medical endorsement.</p></div>' : "";
+    const about = coachAbout + '<div class="card mt12"><b>About</b><p class="body muted mt8">' + E.esc(c.description || "No description yet.") + '</p><p class="caption mt8">' + E.esc(c.city || "") + "</p></div>" +
       '<div class="card mt12"><b>Rules</b><p class="body muted mt8">' + E.esc(c.rules || "Be kind.") + "</p></div>";
-    const pane = view === "members" ? members : view === "about" ? about : posts;
-    const composer = view === "feed" && joined ? '<div class="card mt12"><textarea class="plain-area" id="post" data-model="post-draft" rows="2" placeholder="Share a win or ask the group…" data-testid="post-draft">' + E.esc(E.state.ui.postDraft || "") + "</textarea>" +
+    const challenge = c.challenge || {};
+    const event = c.event || {};
+    const hub = c.type === "coach" ? '<div class="card mt12 challenge-card"><div class="overline">Active challenge</div><div class="heading mt8">' + E.esc(challenge.title || "Weekly check-in") + '</div><p class="caption mt8">' + E.esc(challenge.description || "") + '</p><div class="between mt12"><span class="label">' + (challenge.joined ? challenge.checked + "/" + challenge.days + " days checked in" : challenge.members + " joined") + '</span><span class="topic-tag">No weigh-in ranking</span></div><div class="track light mt8"><span style="width:' + Math.round(((challenge.checked || 0) / Math.max(1, challenge.days || 7)) * 100) + '%;background:var(--success)"></span></div><div class="mt12">' +
+      E.btn(challenge.joined ? "Check in today" : "Join challenge", { size: "md", attrs: 'data-action="community-challenge" data-cid="' + c.id + '" data-testid="community-challenge"' }) + "</div></div>" +
+      '<div class="card mt12"><div class="overline">Upcoming event</div><div class="heading mt8">' + E.esc(event.title || "Community Q&A") + '</div><p class="caption mt8">' + E.esc(event.when || "") + " · " + E.esc(event.mode || "") + '</p><div class="between mt12"><span class="caption">' + (event.attendees || 0) + ' going</span>' +
+      E.btn(event.going ? "Going ✓" : "RSVP", { size: "sm", variant: event.going ? "secondary" : "primary", block: false, attrs: 'data-action="community-rsvp" data-cid="' + c.id + '" data-testid="community-rsvp"' }) + "</div></div>" +
+      '<div class="banner mt12"><span>🛡️</span><span><b>Safe challenge rules</b><span class="caption" style="display:block">No crash diets, public weigh-ins, medicine advice, or winner-by-weight leaderboards.</span></span></div>' : "";
+    const pane = view === "hub" ? hub : view === "members" ? members : view === "about" ? about : posts;
+    const channels = c.type === "coach" && view === "feed" ? '<div class="hscroll mt12">' + (c.channels || []).map(function (x) {
+      return '<button type="button" class="chip ' + (channel === x.id ? "on" : "") + '" data-action="community-channel" data-value="' + x.id + '">' + E.esc(x.label) + "</button>";
+    }).join("") + "</div>" : "";
+    const postMode = E.state.ui.communityPostMode || "text";
+    const photoChoices = [E.img.thali, E.img.bowl, E.img.fruit].map(function (src, i) {
+      return '<button type="button" class="community-photo-pick ' + (E.state.ui.communityPhotoPick === src ? "on" : "") + '" data-action="community-photo-pick" data-src="' + E.esc(src) + '" data-testid="community-photo-' + i + '"><img alt="Demo community photo" src="' + E.esc(src) + '"></button>';
+    }).join("");
+    const todayMeals = E.dayMeals(E.todayIso());
+    const mealChoices = todayMeals.map(function (meal) {
+      const total = E.mealTotals(meal);
+      return '<button type="button" class="meal-strip ' + (E.state.ui.communityMealPick === meal.id ? "on" : "") + '" data-action="community-meal-pick" data-id="' + meal.id + '" data-testid="community-meal-pick"><span class="ph">' + E.esc(meal.emoji || "🍽️") + '</span><span class="grow"><b>' + E.esc(meal.name) + '</b><span class="caption">' + total.kcal + " kcal · " + E.esc(meal.mealType || "meal") + "</span></span></button>";
+    }).join("");
+    const attachmentPicker = postMode === "photo"
+      ? '<div class="mt12"><div class="overline">Choose a demo photo</div><div class="community-photo-grid mt8">' + photoChoices + '</div><p class="caption mt8">This sends the selected image only. No AI processing and nothing is added to your diary.</p></div>'
+      : postMode === "meal"
+        ? '<div class="mt12"><div class="overline">Choose one food log</div><div class="stack mt8">' + (mealChoices || '<p class="caption">No meals logged today. Log a meal first, then return here.</p>') + '</div><p class="caption mt8">Only this meal snapshot is posted. The rest of your diary stays private.</p></div>'
+        : "";
+    const composer = view === "feed" && joined ? '<div class="card mt12"><div class="between"><span class="overline">Posting to</span><span class="topic-tag">' + (channel === "all" ? "Community feed" : "#" + E.esc(channel)) + '</span></div><p class="caption mt8">Visible to community members. Nothing from your diary is attached automatically.</p><div class="hscroll mt12">' +
+      '<button type="button" class="chip ' + (postMode === "text" ? "on" : "") + '" data-action="community-post-mode" data-value="text">Text</button>' +
+      '<button type="button" class="chip ' + (postMode === "photo" ? "on" : "") + '" data-action="community-post-mode" data-value="photo" data-testid="community-post-photo">📷 Photo</button>' +
+      '<button type="button" class="chip ' + (postMode === "meal" ? "on" : "") + '" data-action="community-post-mode" data-value="meal" data-testid="community-post-meal">🍛 Food log' + (E.isPro() ? "" : " · Pro") + "</button></div>" +
+      attachmentPicker +
+      '<textarea class="plain-area mt12" id="post" data-model="post-draft" rows="2" placeholder="' + (postMode === "text" ? "Share a win or ask the group…" : "Add a note (optional)") + '" data-testid="post-draft">' + E.esc(E.state.ui.postDraft || "") + "</textarea>" +
       '<div class="mt8">' + E.btn("Post", { size: "md", attrs: 'data-action="community-post" data-cid="' + c.id + '" data-testid="post-send"' }) + "</div></div>"
       : view === "feed" && !joined ? '<div class="banner mt12"><span>👋</span><span class="grow"><b>Join to post and reply</b><div class="caption">You can read the feed first.</div></span></div>' : "";
     const join = joined
@@ -256,11 +321,22 @@
       : E.btn("Join", { size: "sm", block: false, attrs: 'data-action="join-community" data-cid="' + c.id + '"' });
     const top = E.backBtn() + '<div class="top-title"><div class="heading">' + E.esc(c.name) + '</div><div class="caption">' + c.members + " members</div></div>" +
       (c.admin ? E.iconBtn("settings", 'data-action="go" data-screen="community-settings" data-id="' + c.id + '" aria-label="Community settings"', "flat") : "");
+    let coachHero = "";
+    if (c.type === "coach" && c.coach) {
+      const rel = E.state.coachRelationship || { status: "none" };
+      const active = rel.status === "active" && rel.coach && rel.coach.id === c.coach.id;
+      const pending = rel.status === "pending" && rel.coach && rel.coach.id === c.coach.id;
+      coachHero = '<div class="coach-community-hero"><div class="row gap12">' + E.avatar({ name: c.coach.name, color: c.coach.color, size: 52 }) +
+        '<div class="grow"><div class="overline">Verified Coach Community</div><div class="heading">' + E.esc(c.coach.name) + ' <span class="verified-mark">✓</span></div><div class="caption">' + E.esc(c.coach.qualification) + "</div></div></div><div class=\"mt12\">" +
+        E.btn(active ? "Message Coach" : pending ? "Review coach request" : "Connect with Coach", { size: "md", variant: active ? "primary" : "secondary", attrs: 'data-action="community-coach-connect" data-cid="' + c.id + '" data-testid="community-connect-coach"' }) +
+        '</div><p class="caption mt8">Joining this community does not share health data or start coaching.</p></div>';
+    }
     return E.page({
       top: top,
       body: '<div class="between mt4"><span class="caption">' + E.esc(c.city || "") + "</span>" + join + "</div>" +
-        '<div class="mt12">' + E.segmented([{ id: "feed", label: "Feed" }, { id: "members", label: "Members" }, { id: "about", label: "About" }], view, "comm-view") + "</div>" +
-        composer + pane
+        coachHero +
+        '<div class="mt12">' + E.segmented(c.type === "coach" ? [{ id: "feed", label: "Feed" }, { id: "hub", label: "Challenge" }, { id: "members", label: "Members" }, { id: "about", label: "About" }] : [{ id: "feed", label: "Feed" }, { id: "members", label: "Members" }, { id: "about", label: "About" }], view, "comm-view") + "</div>" +
+        channels + composer + pane
     });
   };
 
@@ -297,18 +373,22 @@
   };
 
   E.modals["create-community"] = function () {
+    const coach = E.state.partner && E.state.partner.registered && E.state.partner.status === "verified";
+    const type = E.state.ui.newCommunityType || "public";
     return '<div class="modal-wrap" style="background:var(--canvas);overflow:auto;padding:16px 18px 24px"><div class="between"><button type="button" class="icon-btn" data-action="close-modal">' + E.icon("x") + '</button><div class="heading">Create community</div><span style="width:44px"></span></div>' +
-      '<p class="caption mt12">Pro members can host a group. This stays inside the demo.</p>' +
+      '<p class="caption mt12">Public communities are interest-led. Verified partners can create a Coach Community for discovery, challenges and Q&A.</p>' +
+      (coach ? '<div class="mt12">' + E.segmented([{ id: "public", label: "Public" }, { id: "coach", label: "Coach Community" }], type, "community-create-type") + "</div>" : "") +
       '<div class="stack mt16">' +
       E.field({ label: "Name", id: "newc", model: "new-comm", value: E.state.ui.newComm, placeholder: "Indiranagar meal prep" }) +
       E.field({ label: "Description", id: "newd", model: "new-about", value: E.state.ui.newAbout, placeholder: "What you cook and when you meet" }) +
       E.field({ label: "Location", id: "newl", model: "new-city", value: E.state.ui.newCity || "Bengaluru" }) +
-      "</div><div class=\"mt16\">" + E.btn("Create", { attrs: 'data-action="submit-community"' }) + "</div></div>";
+      "</div>" + (type === "coach" ? '<div class="banner mt12"><span>✓</span><span><b>Verified Coach Community</b><span class="caption" style="display:block">Community membership will not create a coaching relationship or share health data.</span></span></div>' : "") +
+      '<div class="mt16">' + E.btn("Create", { attrs: 'data-action="submit-community"' }) + "</div></div>";
   };
 
   function sharePeople() {
     return (E.state.chats || []).filter(function (c) {
-      return c.type !== "group" && !c.pending && !c.blocked;
+      return c.type !== "group" && c.type !== "client-group" && !c.pending && !c.blocked && !c.readOnly;
     }).slice().sort(function (a, b) { return (b.time || 0) - (a.time || 0); });
   }
   function youngShare() {

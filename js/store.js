@@ -431,6 +431,50 @@ window.EatAI = window.EatAI || {};
     return "home";
   };
 
+  function referralState(code) {
+    return {
+      ownCode: code || "EATAI42",
+      appliedCode: "",
+      type: "",
+      referrerName: "",
+      appliedAt: "",
+      locked: false,
+      rewardDays: 0,
+      invitees: []
+    };
+  }
+  function coachRelationshipState() {
+    return {
+      status: "none",
+      coach: null,
+      requestedAt: "",
+      permissions: { meals: true, weekly: true, weight: false, water: true, photos: false, health: false }
+    };
+  }
+  function partnerState() {
+    return {
+      registered: false,
+      status: "none",
+      code: "",
+      qualification: "",
+      payoutReady: false,
+      rate: 15,
+      customerDraft: "",
+      customers: [],
+      commissions: []
+    };
+  }
+  E.ensurePartnerState = function (s) {
+    if (!s.referral) s.referral = referralState();
+    if (!s.coachRelationship) s.coachRelationship = coachRelationshipState();
+    if (!s.partner) s.partner = partnerState();
+    if (!s.referral.invitees) s.referral.invitees = [];
+    if (!s.coachRelationship.permissions) s.coachRelationship.permissions = coachRelationshipState().permissions;
+    if (!s.partner.customers) s.partner.customers = [];
+    if (!s.partner.commissions) s.partner.commissions = [];
+    return s;
+  };
+
   function blankPrefs() {
     return {
       coach: { daily: true, weekly: true, morning: false, time: "20:00" },
@@ -462,7 +506,10 @@ window.EatAI = window.EatAI || {};
       commName: "", commAbout: "", commCity: "Bengaluru", commView: "feed", openPost: "",
       replyDraft: "", postDraft: "", nearMe: false, offerCode: "", offerError: "", offerOff: 0,
       billingProvider: "store", macroMode: "", chatStep: 0, customTitle: "", customTime: "15:00",
-      editName: "", editBio: "", socialTags: [], measureWaist: "", measureHips: "", measureChest: ""
+      editName: "", editBio: "", socialTags: [], measureWaist: "", measureHips: "", measureChest: "",
+      referralCode: "", referralError: "", coachQualification: "", partnerContact: "",
+      communityChannel: "all", newCommunityType: "public",
+      communityPostMode: "text", communityPhotoPick: "", communityMealPick: ""
     };
   }
   E.blankOnboarding = function (pre) {
@@ -676,12 +723,40 @@ window.EatAI = window.EatAI || {};
     ];
   }
 
-  function post(id, author, text, time, likes, replies) {
-    return { id: id, author: author, text: text, time: time, likes: likes || 0, liked: false, replies: replies || [] };
+  function post(id, author, text, time, likes, replies, channel, pinned) {
+    return { id: id, author: author, text: text, time: time, likes: likes || 0, liked: false, replies: replies || [], channel: channel || "all", pinned: !!pinned };
   }
   function communities() {
     return {
       mine: [
+        {
+          id: "cm-coach-ravi", name: "Ravi's Healthy Eating", city: "Bengaluru", members: 348,
+          admin: false, joined: true, hue: 205, type: "coach", visibility: "public",
+          description: "Simple Indian meals, honest portions, and weekly accountability with Ravi.",
+          rules: "No crash diets, diagnosis, body shaming, or medicine advice. Personal health details stay private.",
+          coach: { id: "coach-ravi", name: "Ravi Verma", code: "COACH-RAVI", qualification: "Certified nutrition coach", color: "#D9F2FF", verified: true },
+          channels: [
+            { id: "all", label: "All" },
+            { id: "announcements", label: "Announcements" },
+            { id: "meals", label: "Meals" },
+            { id: "questions", label: "Questions" },
+            { id: "wins", label: "Weekly wins" }
+          ],
+          challenge: { id: "challenge-7log", title: "7-Day Meal Logging", description: "Log one honest meal a day. No calorie target and no weigh-in competition.", joined: false, checked: 2, days: 7, members: 86 },
+          event: { id: "event-qna", title: "Sunday meal-prep Q&A", when: "Sun · 6:00 PM", mode: "Live in community", going: false, attendees: 42 },
+          memberList: [
+            { id: "coach-ravi", name: "Ravi Verma", role: "verified coach" },
+            { id: "me", name: "You", role: "member" },
+            { id: "m-aisha", name: "Aisha", role: "moderator" }
+          ],
+          pending: [],
+          posts: [
+            post("p-coach-1", "Ravi Verma ✓", "This week's focus: log one normal meal before trying to improve it. No crash cuts.", "1h", 18, [
+              { id: "rp-coach-1", author: "Neha", text: "Starting with lunch today." }
+            ], "announcements", true),
+            post("p-coach-2", "Aisha · Moderator", "My dal-chawal lunch landed well. Sharing the plate, not my whole diary.", "3h", 9, [], "meals", false)
+          ]
+        },
         { id: "cm1", name: "Bengaluru Run Club", city: "Bengaluru", members: 1284, admin: true, joined: true, hue: 80, description: "Easy weekday runs and honest fuel talk.", rules: "Be kind. No body shaming. No dating pitches.",
           memberList: [{ id: "me", name: "You", role: "admin" }, { id: "m-neha", name: "Neha", role: "member" }, { id: "m-arjun", name: "Arjun", role: "member" }],
           pending: [{ id: "req-kabir", name: "Kabir Menon" }],
@@ -736,6 +811,9 @@ window.EatAI = window.EatAI || {};
     s.dayStatus = {};
     s.typing = null;
     s.pendingCheckout = null;
+    s.referral = referralState("GUEST42");
+    s.coachRelationship = coachRelationshipState();
+    s.partner = partnerState();
     s.communities = unjoinedCatalog();
     s.user.isGuest = true;
     s.user.isEmailVerified = false;
@@ -844,7 +922,10 @@ window.EatAI = window.EatAI || {};
         { id: "sr3", length: 4, start: E.iso(E.addDays(-18)), end: E.iso(E.addDays(-14)), reason: "manual_reset" }
       ],
       typing: null,
-      payments: []
+      payments: [],
+      referral: referralState("PRIYA42"),
+      coachRelationship: coachRelationshipState(),
+      partner: partnerState()
     };
   }
 
@@ -994,6 +1075,46 @@ window.EatAI = window.EatAI || {};
     s.ui.editName = s.user.name;
     s.ui.editBio = s.user.bio;
     s.ui.socialTags = (s.user.training || []).slice();
+    if (persona === "priya") {
+      s.referral.invitees = [
+        { id: "rf1", name: "A•••a", status: "purchased", plan: "Yearly", rewardDays: 3 },
+        { id: "rf2", name: "M•••a", status: "free", plan: "", rewardDays: 0 }
+      ];
+      s.referral.rewardDays = 3;
+      s.coachRelationship = {
+        status: "pending",
+        coach: { id: "coach-ravi", name: "Ravi Verma", code: "COACH-RAVI", qualification: "Certified nutrition coach", color: "#D9F2FF" },
+        requestedAt: E.todayIso(),
+        permissions: { meals: true, weekly: true, weight: false, water: true, photos: false, health: false }
+      };
+    }
+    if (persona === "rahul") {
+      s.referral.ownCode = "RAHUL42";
+      s.partner = {
+        registered: true,
+        status: "verified",
+        code: "COACH-RAHUL",
+        qualification: "Certified fitness and nutrition coach",
+        payoutReady: true,
+        rate: 15,
+        customerDraft: "",
+        customers: [
+          { id: "pc1", name: "N•••a", contact: "neha@demo.app", status: "paid", plan: "Yearly", joinedAt: E.iso(E.addDays(-36)) },
+          { id: "pc2", name: "A•••n", contact: "aman18@demo.app", status: "free", plan: "", joinedAt: E.iso(E.addDays(-12)) },
+          { id: "pc3", name: "S•••a", contact: "sunita@demo.app", status: "pending", plan: "", joinedAt: E.iso(E.addDays(-2)) }
+        ],
+        commissions: [
+          { id: "cm1", customer: "N•••a", date: E.iso(E.addDays(-30)), gross: 1999, net: 1530, rate: 15, amount: 230, status: "approved", plan: "Yearly" },
+          { id: "cm2", customer: "R•••l", date: E.iso(E.addDays(-5)), gross: 299, net: 228, rate: 15, amount: 34, status: "pending", plan: "Monthly" },
+          { id: "cm3", customer: "P•••a", date: E.iso(E.addDays(-45)), gross: 999, net: 760, rate: 15, amount: 114, status: "reversed", plan: "6 months" }
+        ]
+      };
+    }
+    if (persona === "teen" || persona === "kid") {
+      s.referral.ownCode = persona === "kid" ? "AMAN42" : "AARAV42";
+      s.coachRelationship.status = "guardian";
+    }
+    E.ensurePartnerState(s);
     return s;
   };
 
@@ -1003,6 +1124,7 @@ window.EatAI = window.EatAI || {};
       if (!raw) return null;
       const data = JSON.parse(raw);
       if (!data || data.version !== 3 || !data.user) return null;
+      E.ensurePartnerState(data);
       data.modal = null; data.toast = null; data.confirm = null; data.sheet = null;
       if (!data.ui) data.ui = blankUi();
       data.ui.busy = null; data.ui.analyzing = false; data.typing = null;

@@ -141,6 +141,43 @@ test("a usual-meal chip logs the first meal in two taps and starts the streak", 
   assert.deepEqual(errors, []);
 });
 
+test("macros are editable after a scan and from logged meal details", async () => {
+  const { page, errors } = await open();
+  await onboardGuest(page);
+  await page.click("[data-testid=combo-dal-chawal]");
+  await page.fill("[data-testid=meal-protein-input]", "40");
+  await page.click("[data-testid=item-0-macros-toggle]");
+  await page.fill("[data-testid=item-0-protein-input]", "25");
+  await page.click("[data-testid=scan-add]");
+  await page.click("[data-testid=first-meal-done]");
+
+  let saved = await page.evaluate(() => {
+    const E = window.EatAI;
+    return { totals: E.mealTotals(E.state.meals[0]), first: E.state.meals[0].items[0] };
+  });
+  assert.equal(saved.first.p, 25);
+
+  await page.evaluate(() => {
+    const E = window.EatAI;
+    E.state.nav = { tab: "diary", stack: [{ id: "diary" }] };
+    E.render({});
+  });
+  await page.click("[data-action=open-meal]");
+  await page.click("[data-testid=meal-edit]");
+  await page.fill("[data-testid=meal-carbs-input]", "80");
+  await page.click("[data-testid=item-0-macros-toggle]");
+  await page.fill("[data-testid=item-0-fats-input]", "10");
+  await page.click("[data-testid=edit-save]");
+
+  saved = await page.evaluate(() => {
+    const E = window.EatAI;
+    return { totals: E.mealTotals(E.state.meals[0]), first: E.state.meals[0].items[0] };
+  });
+  assert.equal(saved.totals.c, 80);
+  assert.equal(saved.first.f, 10);
+  assert.deepEqual(errors, []);
+});
+
 test("declining AI consent lands on the free food list, not a dead end", async () => {
   const { page } = await open("&persona=priya");
   await page.evaluate(() => { const E = window.EatAI; E.state.meals = []; E.state.user.subscription.status = "trial"; E.state.user.subscription.trialUsed = true; E.render({}); });
@@ -218,9 +255,14 @@ test("barcode stays Pro for free users and works for Pro", async () => {
 
 test("logging again on a day that already counted does not double the streak", async () => {
   const { page } = await open("&persona=priya");
+  const before = await page.evaluate(() => {
+    const E = window.EatAI;
+    E.syncStreak();
+    return E.state.user.streak.current;
+  });
   await page.click("[data-action=quick-add]");
-  const streak = await page.evaluate(() => window.EatAI.state.user.streak.current);
-  assert.equal(streak, 5);
+  const after = await page.evaluate(() => window.EatAI.state.user.streak.current);
+  assert.equal(after, before);
 });
 
 test("bigger text toggle switches the whole app", async () => {
@@ -289,4 +331,178 @@ test("scan discard still returns to the previous screen", async () => {
   assert.equal(await photoScan(page), "result");
   await page.click("[data-testid=scan-discard]");
   assert.equal(await screenId(page), "home");
+});
+
+test("coach code attribution stays separate from coaching data consent", async () => {
+  const { page, errors } = await open("&persona=priya");
+  await page.click("[data-tab=profile]");
+  await page.click("[data-testid=open-referrals]");
+  await page.fill("[data-testid=referral-code-input]", "coach-ravi");
+  await page.click("[data-testid=apply-referral]");
+  const linked = await page.evaluate(() => ({
+    code: window.EatAI.state.referral.appliedCode,
+    locked: window.EatAI.state.referral.locked,
+    coachStatus: window.EatAI.state.coachRelationship.status
+  }));
+  assert.deepEqual(linked, { code: "COACH-RAVI", locked: false, coachStatus: "pending" });
+  await page.click("[data-action=back]");
+  await page.click("[data-testid=open-my-coach]");
+  assert.equal(await page.getAttribute("[data-testid=coach-permission-photos]", "aria-checked"), "false");
+  await page.click("[data-testid=accept-coach]");
+  assert.equal(await page.evaluate(() => window.EatAI.state.coachRelationship.status), "active");
+  assert.deepEqual(errors, []);
+});
+
+test("coach commission is created only after a successful Pro purchase", async () => {
+  const { page, errors } = await open("&persona=priya");
+  await page.evaluate(() => {
+    const E = window.EatAI;
+    E.state.referral.appliedCode = "COACH-RAVI";
+    E.state.referral.type = "coach";
+    E.state.referral.referrerName = "Ravi Verma";
+    E.state.modal = { id: "paywall" };
+    E.render({});
+  });
+  assert.equal(await page.evaluate(() => window.EatAI.state.referral.purchase || null), null);
+  assert.doesNotMatch(await page.textContent(".paywall"), /15%|net collected revenue/);
+  await page.click("[data-testid=paywall-buy]");
+  await page.waitForFunction(() => window.EatAI.state.referral.locked === true);
+  const purchase = await page.evaluate(() => window.EatAI.state.referral.purchase);
+  assert.equal(purchase.status, "pending");
+  assert.equal(purchase.rate, 15);
+  assert.ok(purchase.commission > 0);
+  await page.evaluate(() => {
+    const E = window.EatAI;
+    E.state.confirm = null;
+    E.state.nav = { tab: "profile", stack: [{ id: "profile" }, { id: "referrals" }] };
+    E.render({});
+  });
+  assert.doesNotMatch(await page.textContent("#stage"), /15%|net collected revenue|commission pending/);
+  assert.match(await page.textContent("#stage"), /Referral confirmed/);
+  assert.deepEqual(errors, []);
+});
+
+test("verified coach can invite a customer but earns nothing before Pro", async () => {
+  const { page, errors } = await open("&persona=rahul");
+  await page.click("[data-tab=profile]");
+  await page.click("[data-testid=open-coach-partner]");
+  const before = await page.evaluate(() => ({
+    customers: window.EatAI.state.partner.customers.length,
+    commissions: window.EatAI.state.partner.commissions.length
+  }));
+  await page.fill("[data-testid=partner-customer-input]", "new.customer@demo.app");
+  await page.click("[data-testid=partner-invite-customer]");
+  await page.waitForFunction((n) => window.EatAI.state.partner.customers.length === n + 1, before.customers);
+  const after = await page.evaluate(() => ({
+    customer: window.EatAI.state.partner.customers[0],
+    commissions: window.EatAI.state.partner.commissions.length
+  }));
+  assert.equal(after.customer.status, "pending");
+  assert.equal(after.commissions, before.commissions);
+  assert.match(await page.textContent("#stage"), /Sign-ups and free trials earn ₹0/);
+  assert.deepEqual(errors, []);
+});
+
+test("verified coach community has channels, safe challenges, and a separate coach consent step", async () => {
+  const { page, errors } = await open("&persona=priya");
+  await page.evaluate(() => {
+    const E = window.EatAI;
+    E.state.nav = { tab: "chat", stack: [{ id: "communities" }] };
+    E.render({});
+  });
+  assert.match(await page.textContent("#stage"), /Communities.*Coach.*Client group/s);
+  await page.click('[data-action="open-community"][data-id="cm-coach-ravi"]');
+  assert.match(await page.textContent("#stage"), /Verified Coach Community/);
+  assert.match(await page.textContent("#stage"), /does not share health data or start coaching/);
+  await page.click('[data-action="community-channel"][data-value="meals"]');
+  assert.match(await page.textContent("#stage"), /Sharing the plate, not my whole diary/);
+  await page.click('[data-action="comm-view"][data-value="hub"]');
+  assert.match(await page.textContent("#stage"), /No crash diets.*public weigh-ins/s);
+  await page.click("[data-testid=community-challenge]");
+  assert.equal(await page.evaluate(() => window.EatAI.communityById("cm-coach-ravi").challenge.joined), true);
+  await page.click("[data-testid=community-connect-coach]");
+  assert.equal(await screenId(page), "my-professional-coach");
+  await page.click("[data-testid=accept-coach]");
+  const types = await page.evaluate(() => window.EatAI.state.chats.filter((c) => c.professional).map((c) => c.type).sort());
+  assert.deepEqual(types, ["client-group", "professional-coach"]);
+  assert.deepEqual(errors, []);
+});
+
+test("coach chat and private client group stay separate from normal chats and private diary data", async () => {
+  const { page, errors } = await open("&persona=priya");
+  await page.evaluate(() => {
+    const E = window.EatAI;
+    E.state.coachRelationship.status = "active";
+    E.ensureCoachChats();
+    E.state.nav = { tab: "chat", stack: [{ id: "messages" }] };
+    E.render({});
+  });
+  assert.match(await page.textContent("#stage"), /Professional coaching/);
+  assert.ok(await page.$("[data-testid=open-coach-chat]"));
+  await page.click("[data-testid=open-client-group]");
+  assert.match(await page.textContent("[data-testid=client-group-privacy]"), /diary, weight and photos are never attached automatically/);
+  await page.click('[data-action="open-group"]');
+  assert.match(await page.textContent("#stage"), /Private client group/);
+  await page.click("[data-testid=leave-client-group]");
+  await confirm(page);
+  assert.equal(await page.evaluate(() => window.EatAI.state.coachRelationship.clientGroupLeft), true);
+  assert.deepEqual(errors, []);
+});
+
+test("verified coach can create a private client group from accepted customers", async () => {
+  const { page, errors } = await open("&persona=rahul");
+  await page.evaluate(() => {
+    const E = window.EatAI;
+    E.state.nav = { tab: "profile", stack: [{ id: "coach-partner" }] };
+    E.render({});
+  });
+  await page.click("[data-testid=new-client-group]");
+  await page.fill("#client-group-name", "Rahul Morning Batch");
+  await page.click('[data-action="pick-client-customer"]');
+  await page.click("[data-testid=create-client-group]");
+  assert.equal(await screenId(page), "thread");
+  const group = await page.evaluate(() => window.EatAI.state.chats.find((c) => c.name === "Rahul Morning Batch"));
+  assert.equal(group.type, "client-group");
+  assert.match(await page.textContent("#stage"), /Private client group/);
+  assert.deepEqual(errors, []);
+});
+
+test("community posts can include a selected photo or one private food-log snapshot", async () => {
+  const { page, errors } = await open("&persona=rahul");
+  await page.evaluate(() => {
+    const E = window.EatAI;
+    E.state.nav = { tab: "chat", stack: [{ id: "community", params: { id: "cm-coach-ravi" } }] };
+    E.state.ui.commView = "feed";
+    E.render({});
+  });
+  await page.click("[data-testid=community-post-photo]");
+  await page.click("[data-testid=community-photo-0]");
+  await page.fill("[data-testid=post-draft]", "Sunday thali");
+  await page.click("[data-testid=post-send]");
+  let latest = await page.evaluate(() => window.EatAI.communityById("cm-coach-ravi").posts[0]);
+  assert.ok(latest.image);
+  assert.equal(latest.meal, null);
+  await page.click("[data-testid=community-post-meal]");
+  await page.click("[data-testid=community-meal-pick]");
+  await page.fill("[data-testid=post-draft]", "Breakfast check-in");
+  await page.click("[data-testid=post-send]");
+  latest = await page.evaluate(() => window.EatAI.communityById("cm-coach-ravi").posts[0]);
+  assert.equal(latest.image, "");
+  assert.ok(latest.meal && latest.meal.name && latest.meal.kcal > 0);
+  assert.deepEqual(Object.keys(latest.meal).sort(), ["c", "emoji", "f", "image", "kcal", "name", "p"]);
+  assert.match(await page.textContent("#stage"), /Shared food log/);
+  assert.deepEqual(errors, []);
+});
+
+test("free community member sees the Pro reason before sharing a food log", async () => {
+  const { page, errors } = await open("&persona=priya");
+  await page.evaluate(() => {
+    const E = window.EatAI;
+    E.state.nav = { tab: "chat", stack: [{ id: "community", params: { id: "cm-coach-ravi" } }] };
+    E.state.ui.commView = "feed";
+    E.render({});
+  });
+  await page.click("[data-testid=community-post-meal]");
+  assert.match(await page.textContent(".paywall"), /selected meal is posted.*rest of your diary stays private/s);
+  assert.deepEqual(errors, []);
 });

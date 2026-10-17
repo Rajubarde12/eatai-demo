@@ -1,17 +1,70 @@
 # Demo changes and new features
 
-Last updated: 2026-10-16
+Last updated: 2026-10-17
 
 Main app (`eatai-app` + `eatAi`) mein kuch dalne se pehle yeh file padho. Yahan sirf `eatai-demo` ka hisaab hai: kya naya dikhta hai, kaunsa flow badla, aur kya main app mein pehle se hai.
 
 Demo local browser prototype hai. Sign-in, scan, aur payment simulated hain. Purana saved demo `eatai-demo-v2` key par nahi tikta — refresh naya install hai (`eatai-demo-v3`).
+
+## Naya — Communities 2.0 + Professional Coach chat/client groups
+
+Yeh sirf demo prototype hai. Existing community join/post/moderation ko teen clear levels mein badhaya: **Public Community → Verified Coach Community → Private Client Group**. Main app/backend demo approval ke baad hi.
+
+- Communities list par hierarchy strip aur card type badges. Public/private communities pehle jaisi; naya seed **Ravi's Healthy Eating** verified Coach Community hai.
+- Coach Community card/screen par verified host, qualification, disclosure (“verified” medical endorsement nahi), channels (All, Announcements, Meals, Questions, Weekly wins), pinned announcement, safe 7-day logging challenge aur live Q&A RSVP.
+- Challenge mein public weigh-in ranking, crash diet, medicine advice nahi. Join aur daily check-in simulated; same-day duplicate check-in blocked. Event RSVP on/off aur attendee count simulated.
+- Feed composer har post se pehle audience batata hai: community members dekhte hain; diary, weight aur photos automatic attach nahi. Selected channel par post save hota hai. Existing report/like/reply/admin moderation chalta hai.
+- Community composer ab **Text / Photo / Food log** support karta hai. Photo demo picker normal image post hai—AI consent nahi aur diary entry nahi. Food log existing aaj ke meals mein se sirf selected meal ka frozen card (name, photo/emoji, kcal, P/C/F) post karta hai; full diary/date/history payload nahi.
+- Community Food log sharing existing meal-sharing rule ke hisaab se Pro hai. Free user ko exact privacy reason ke saath paywall; purchase/trial ke baad wahi meal picker resume. Photo aur text Pro-gated nahi.
+- Community join coaching consent nahi hai. **Connect with Coach** separate `My Professional Coach` permission review kholta hai. Active relation ho to wahi CTA private 1:1 coach thread kholta hai.
+- Coach accept karne ke baad Chat → **Professional coaching** section: verified 1:1 Coach chat aur **Private client group**. Group banner/member info saaf kehta hai ki sirf bheje hue messages visible hain; personal coach permissions group ko nahi milte.
+- Client group leave karne par 1:1 coach relation active rehta hai. My Professional Coach se rejoin ho sakta hai. Coach remove par professional threads history ke liye dikhte hain par read-only ho jaate hain.
+- Verified Rahul Coach Partner dashboard se accepted customers select karke named private client group create kar sakta hai. Pending invite customer group selection mein nahi aata.
+- Verified Partner nayi community create karte waqt Public ya Coach Community choose kar sakta hai. Coach Community ko default channels, safe challenge, Q&A event aur pinned first post milta hai.
+- Under-18 ka existing Chat block rehta hai; Coach connect guardian screen par jata hai. Guest ko existing email+OTP account gate milta hai.
+- Tests: coach community hierarchy/channels/challenge, separate consent → 1:1/group creation, group privacy + leave, aur Coach Partner group creation.
+
+### App/backend mein baad mein
+
+- Community, channel, challenge, event/RSVP aur client-group membership ke server-authoritative resources. Public community membership, coaching relationship, referral attribution aur client-group membership alag IDs/consents.
+- Role checks: owner/admin/moderator/verified-coach/member. Coach qualification verification ko medical endorsement ki tarah expose na karo.
+- Group messages mein diary fields kabhi implicit payload na hon. Meal/weekly report explicit snapshot ho, audit metadata ke saath. Permission revoke par coach data access turant band; message history retention policy legal se.
+- Challenge templates moderation allowlist se: logging, water, meal prep, walking. Weight-loss leaderboard, unsafe calorie target aur pregnancy/under-18 challenge reject.
+- Notifications: announcements immediate opt-in; baaki daily digest/mute. Slow-mode, report queue, pinned post aur archive audit logs.
+
+## Naya — referral codes + Professional Coach Partner business
+
+Yeh abhi sirf demo mein hai. Main app/backend mein tab daalo jab user demo approve kare. Existing **AI Coach** alag feature hai; human role ko har jagah **Professional Coach** bola gaya hai.
+
+- Profile mein naya section: **Refer & rewards**, **My Professional Coach**, aur **Coach Partner**. Guest ko pehle existing email + OTP claim flow milta hai. Under-18 ko Coach Partner registration nahi; coaching connect par guardian approval message aur Home ka safe exit.
+- Referral link/deep-link nahi. Sirf manually share/apply hone wala code: normal user jaise `PRIYA42`, Professional Coach jaise `COACH-RAVI`. Demo valid codes: `COACH-RAVI`, `COACH-RAHUL`, `RAMESH42`, `PRIYA42`.
+- Code apply karne par join/install/free trial ka reward nahi. Code account par ek baar attach hota hai. Successful simulated **Pay now** ke baad lock hota hai. Customer ko sirf neutral affiliate disclosure dikhta hai; exact rate/amount Coach Partner ledger tak limited hai. Normal referrer ko 3 banked Pro days. Failed/free/refunded copy mein ₹0.
+- Customer paywall par linked coach, “may earn a referral commission” aur “your price stays the same” dikhata hai—percentage/net jargon nahi. Purchase ke baad Refer screen sirf “Referral confirmed” dikhata hai. Trial commission create nahi karta.
+- Priya seed par Ravi ka pending coach request hai. **Referral attribution aur health-data access alag hain**: code lagane se data share nahi hota. Customer Meals, Weekly report, Weight, Water, Progress photos aur Health details permissions review karta hai; photos/health default OFF. Accept, decline aur later Remove access.
+- Rahul seed verified Coach Partner hai: `COACH-RAHUL`, masked customer list, Free/Pending/Paid status, Pending/Approved/Reversed commission ledger, gross → net × 15% breakdown, payout threshold copy. Verified email ya EatAI ID se customer request bhej sakta hai; request par commission ₹0 aur customer acceptance abhi pending.
+- Non-coach adult qualification bhar kar demo mein instant Coach Partner approval dekh sakta hai. Real app ke PAN/KYC/bank/tax steps sirf clearly labelled requirements hain; demo sensitive details collect nahi karta.
+- New screens loading/error dev states use karte hain; slow-net flag partner apply/invite ko delay karta hai. Important actions par `data-testid`: referral apply/copy, coach permissions/accept/decline/remove, partner apply/code/customer invite.
+- Tests mein code attribution vs consent separation, paid purchase ke baad hi commission, aur customer invite par zero commission cover kiya.
+
+### App mein kaise jayega
+
+- Profile routes: referral center, professional coach consent, partner dashboard. `AI Coach` labels/routes ko mat rename karo.
+- Server-authoritative code attribution purchase se pehle ek baar; coaching relationship alag resource. Customer permissions scoped aur revocable. Under-18 guardian branch ke bina relationship active na ho.
+- Normal user rewards in-app entitlement wallet hon; coach partner rewards cash ledger. IAP/Razorpay dono account-level attribution code padhein — platform referral links nahi.
+
+### Backend mein kya update lagega
+
+- Models/resources: `ReferralCode`, `ReferralAttribution`, `ProfessionalCoachProfile`, `CoachClientRelationship`, `CommissionLedger`, `CoachPayout`.
+- Payment receipt/webhook verified hone ke baad idempotent ledger event: gross, tax/store/payment deductions, net, rate, amount, status. Free trial/signup par event nahi. Refund/chargeback par reversal. Renewal commission duration agreement se control.
+- Suggested contracts: apply/read referral, coach apply/dashboard/earnings, customer invite/accept/decline, permission patch/revoke, payout details. Unique payment event ID se duplicate commission roko.
+- Admin later: coach approve/suspend, KYC/payout review, custom rate, fraud flag, refund adjustment. PAN/GST/TDS treatment CA/legal se finalize.
 
 ## Naya — supporting features ko aasaan banaya (chat, community, progress, weight, diary)
 
 Sirf demo. User ki tarah browser mein chala kar mile hue problems.
 
 - **Har confirm dialog ka bug:** backdrop buttons ke upar tha, Cancel/OK par tap nahi lagta tha. `.dialog { position: relative }` se theek.
-- **Meal edit:** log hone ke baad galat amount theek karne ka koi rasta nahi tha (sirf Share/Delete). Food detail par **Edit amount or calories** (`meal-edit`) → wahi scan-result screen “Editing a logged meal” mode mein, − + / naam / kcal / meal type → **Save changes** (`edit-save`) ya Cancel (`edit-cancel`). Toast “Meal updated · N kcal”. Upar ke icons par aria-label (Back, Share meal, Delete meal `meal-delete`).
+- **Meal edit:** log hone ke baad galat amount theek karne ka koi rasta nahi tha (sirf Share/Delete). Food detail par **Edit amount or nutrition** (`meal-edit`) → wahi scan-result screen “Editing a logged meal” mode mein, − + / naam / kcal / protein / carbs / fats / meal type → **Save changes** (`edit-save`) ya Cancel (`edit-cancel`). Fresh scan review par bhi meal-total aur har individual food item ka P/C/F editable hai. Food row pehle compact P/C/F summary dikhata hai; summary tap par inputs neeche expand hote hain. Item macro badalne par us item ki calories aur meal totals 4/4/9 se recalculate hote hain; calories manually alag hon to mismatch warning aati hai par save block nahi hota. Toast “Meal updated · N kcal”. Upar ke icons par aria-label (Back, Share meal, Delete meal `meal-delete`).
 - **Chat:** thread header mein ⋮ (`chat-more`, groups ko chhod kar) → sheet: Report / Block (“X won't be told”). Block ab confirm maangta hai. Blocked banner par **Unblock** (`chat-unblock`). Chat list mein request bheji ho to ✓✓ ki jagah ⏳, blocked par 🚫.
 - **Community:** Leave ab confirm ke saath (`community-leave`, ghost button). Doosron ke post par 🚩 report (`post-report`) → post chhup jata hai, My reports mein jata hai. Post box feed ke upar card mein (`post-draft`, `post-send`). Join nahi kiya to “Join to post and reply”. “1 reply / N replies” grammar, post par time.
 - **Weight:** number par tap karke type kar sakte ho (`weight-input`, decimal, comma bhi chalega, Enter = save). 35–220 kg ke bahar error. Toast: “Saved 63.4 kg · ▼ 0.4 kg since last · 3.4 kg to goal” (protected plan / health goal par goal wala hissa nahi). Progress par “🎯 Goal X kg · Y kg to go” (`weight-goal`).

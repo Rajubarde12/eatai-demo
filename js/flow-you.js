@@ -57,6 +57,10 @@
       '<div class="card mt12 between"><div class="grow"><div class="heading" style="font-size:15px">Bigger text</div><div class="caption">Larger words and buttons across the app.</div></div>' +
       E.switch(!!(E.state.prefs.display && E.state.prefs.display.largeText), 'data-action="toggle-large-text" data-testid="large-text-toggle" aria-label="Bigger text"') + "</div>" +
       '<div class="overline mt24">Features</div><div class="list-card mt8">' + featureHtml + "</div>" +
+      '<div class="overline mt24">Referrals & professional coaching</div><div class="list-card mt8">' +
+      E.navRow("gift", "Refer & rewards", "Code-based · reward only after a Pro purchase", 'data-action="go" data-screen="referrals" data-testid="open-referrals"') +
+      E.navRow("user-check", "My Professional Coach", u.ageBlocked ? "Guardian approval required" : E.state.coachRelationship.status === "pending" ? "Request waiting for your review" : E.state.coachRelationship.status === "active" ? E.state.coachRelationship.coach.name + " · you control access" : "Connect without sharing data automatically", 'data-action="go" data-screen="my-professional-coach" data-testid="open-my-coach"') +
+      E.navRow("briefcase", "Coach Partner", E.state.partner.registered ? "Customers, earnings and payouts" : "Earn only when referred users buy Pro", 'data-action="go" data-screen="coach-partner" data-testid="open-coach-partner"') + "</div>" +
       '<div class="overline mt24">App settings</div><div class="list-card mt8">' + settings.map(function (s) { return E.navRow(s[0], s[1], s[2], 'data-action="go" data-screen="' + s[3] + '"'); }).join("") + "</div>" +
       '<div class="overline mt24">Privacy & safety</div><div class="list-card mt8">' +
       E.navRow("shield", "Privacy & Safety", u.isGuest ? "Add your email to manage discovery" : "Discovery, pause, blocked, reports", 'data-action="go" data-screen="privacy"') + "</div>" +
@@ -183,15 +187,21 @@
       "streak-freeze": "A monthly freeze saves one missed day. The home chip stays free.",
       "streak-runs": "Ended streaks show past runs and why each one stopped.",
       "share-card": "The week card shares hit days and protein, not your whole diary.",
-      "ai-read": "AI read compares two private photos. They stay on this phone."
+      "ai-read": "AI read compares two private photos. They stay on this phone.",
+      "community-meal": "Posting a food log to a community is a Pro sharing feature. Only the selected meal is posted; the rest of your diary stays private."
     }[E.state.ui.pendingGate] || "";
     const chosen = plans.find(function (p) { return p.id === plan; }) || plans[0];
+    const referral = E.state.referral;
+    const referralNote = referral && referral.type === "coach" && referral.appliedCode && !referral.locked
+      ? '<div class="banner mt12" style="background:rgba(255,255,255,.1);color:white"><span>🤝</span><span><b>' + E.esc(referral.appliedCode) + ' linked</b><span class="caption" style="display:block;color:rgba(255,255,255,.7)">' + E.esc(referral.referrerName) + ' may earn a referral commission after this payment. Your price stays the same.</span></span></div>'
+      : "";
     const offer = razor ? '<div class="mt12">' + E.field({ label: "Offer code", id: "offer", model: "offer-code", value: E.state.ui.offerCode, placeholder: "SAVE20" }) +
       (E.state.ui.offerError ? '<p class="field-error mt8">' + E.esc(E.state.ui.offerError) + "</p>" : "") +
       '<div class="mt8">' + E.btn(off ? "Offer applied · 20% off" : "Apply code", { size: "md", variant: "light", attrs: 'data-action="apply-offer"' }) + "</div></div>" : "";
     return '<div class="paywall"><div class="between"><button type="button" class="icon-btn" style="background:rgba(255,255,255,.12);color:white" data-action="close-modal" aria-label="Close">' + E.icon("x") + '</button><span class="gold">EATAI PRO</span><span style="width:44px"></span></div>' +
       '<div class="display mt12" style="font-size:34px">' + (pro ? "You're on Pro" : "Log without limits") + "</div>" +
       (gateWhy ? '<p class="body mt8" style="color:rgba(255,255,255,.8)">' + E.esc(gateWhy) + "</p>" : "") +
+      referralNote +
       '<div class="mt12">' + E.segmented([{ id: "store", label: "App Store / Play" }, { id: "razorpay", label: "Razorpay" }], provider, "billing-provider") + "</div>" +
       '<div class="mt16">' + perks.map(function (p) { return '<div class="row gap12" style="padding:6px 0"><span class="ico-sq" style="background:rgba(255,255,255,.08);color:var(--lime)">' + E.icon(p[0] === "barcode" ? "scan-barcode" : p[0]) + '</span><span>' + p[1] + "</span></div>"; }).join("") + "</div>" +
       '<div class="mt12" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">' + plans.map(function (p) {
