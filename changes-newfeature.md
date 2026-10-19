@@ -8,7 +8,9 @@ Demo local browser prototype hai. Sign-in, scan, aur payment simulated hain. Pur
 
 ## Naya — Communities 2.0 + Professional Coach chat/client groups
 
-Yeh sirf demo prototype hai. Existing community join/post/moderation ko teen clear levels mein badhaya: **Public Community → Verified Coach Community → Private Client Group**. Main app/backend demo approval ke baad hi.
+Yeh sirf demo prototype hai. Existing community join/post/moderation ko teen clear levels mein badhaya: **Public Community → Verified Coach Community → Private Client Group**.
+
+**App (2026-10-19):** list demo jaisi hai: hierarchy strip, cover card, type pill, host line. Community screen par coach hero aur feed composer card (Posting to, Text, Photo, Food log, Post). Food log Pro hai: aaj ka ek meal, frozen snapshot (name, photo, items, kcal, P/C/F). Share preview par diary add/skip. Diary se delete post/chat copy nahi hataata. Shared meal details diary jaisi hain, read-only, Add to my diary optional. Channels, pinned announcement, 7-day challenge, aur Q&A RSVP hain. Host par verified check tab, jab review ho. Connect with Coach button dikhta hai, permission screen abhi nahi. Private client group abhi nahi.
 
 - Communities list par hierarchy strip aur card type badges. Public/private communities pehle jaisi; naya seed **Ravi's Healthy Eating** verified Coach Community hai.
 - Coach Community card/screen par verified host, qualification, disclosure (“verified” medical endorsement nahi), channels (All, Announcements, Meals, Questions, Weekly wins), pinned announcement, safe 7-day logging challenge aur live Q&A RSVP.
@@ -66,6 +68,7 @@ Sirf demo. User ki tarah browser mein chala kar mile hue problems.
 - **Har confirm dialog ka bug:** backdrop buttons ke upar tha, Cancel/OK par tap nahi lagta tha. `.dialog { position: relative }` se theek.
 - **Meal edit:** log hone ke baad galat amount theek karne ka koi rasta nahi tha (sirf Share/Delete). Food detail par **Edit amount or nutrition** (`meal-edit`) → wahi scan-result screen “Editing a logged meal” mode mein, − + / naam / kcal / protein / carbs / fats / meal type → **Save changes** (`edit-save`) ya Cancel (`edit-cancel`). Fresh scan review par bhi meal-total aur har individual food item ka P/C/F editable hai. Food row pehle compact P/C/F summary dikhata hai; summary tap par inputs neeche expand hote hain. Item macro badalne par us item ki calories aur meal totals 4/4/9 se recalculate hote hain; calories manually alag hon to mismatch warning aati hai par save block nahi hota. Toast “Meal updated · N kcal”. Upar ke icons par aria-label (Back, Share meal, Delete meal `meal-delete`).
 - **Chat:** thread header mein ⋮ (`chat-more`, groups ko chhod kar) → sheet: Report / Block (“X won't be told”). Block ab confirm maangta hai. Blocked banner par **Unblock** (`chat-unblock`). Chat list mein request bheji ho to ✓✓ ki jagah ⏳, blocked par 🚫.
+- **App (2026-10-19):** message image button ab demo jaisa **Add to this chat** sheet kholta hai: Photo (camera/library, diary mein log nahi) ya Meal (aaj ke real food logs, typed meal, ya food photo). Typed/photo par Pro + AI consent, estimate review, optional **Also add to my diary**, **Not this meal**, aur paywall ke baad picker resume hai. Meal card server-authoritative frozen snapshot hai; baaki diary private rehti hai. Abhi meal share direct chat mein hai, group mein nahi.
 - **Community:** Leave ab confirm ke saath (`community-leave`, ghost button). Doosron ke post par 🚩 report (`post-report`) → post chhup jata hai, My reports mein jata hai. Post box feed ke upar card mein (`post-draft`, `post-send`). Join nahi kiya to “Join to post and reply”. “1 reply / N replies” grammar, post par time.
 - **Weight:** number par tap karke type kar sakte ho (`weight-input`, decimal, comma bhi chalega, Enter = save). 35–220 kg ke bahar error. Toast: “Saved 63.4 kg · ▼ 0.4 kg since last · 3.4 kg to goal” (protected plan / health goal par goal wala hissa nahi). Progress par “🎯 Goal X kg · Y kg to go” (`weight-goal`).
 - **Progress:** chart labels “16 Oct” style, kam ticks. Calorie chart ke neeche “- - - Your goal N kcal”. Avg protein “37/120g”. Free user ko “Freezes left 0” ki jagah “📅 N/7 Days logged”.
@@ -82,7 +85,7 @@ Sirf demo. User ki tarah browser mein chala kar mile hue problems.
 
 Yeh abhi sirf demo mein hai. Main app mein tab daalo jab demo approve ho. Wajah: pehle free user ka har scan paywall tha aur "Eat it again" khali tha, to naya guest ek bhi meal log nahi kar pata tha.
 
-**App queue (2026-10-19):** Food list, Home card, first meal, onboarding, Bigger text, Diary search, Daily streak log, This week report (Progress aur Profile → Streak, Home par nahi), Ended streaks, Share this week, Get AI read, Coach history, aur custom reminder edit/delete app mein hain. Paywall screen ki copy abhi nahi. **Paywall baad mein** — user ne explicitly baad ke liye mark kiya. Jab tak woh na bole, yeh mat chhedo: 3-day free trial, Pay now / trial cancel copy, guest paywall (“Why this stopped”, email), paywall headline, Welcome ka trial line, aur scan gate par “Not now, use the food list”.
+**App queue (2026-10-19):** Food list, Home card, first meal, onboarding, Bigger text, Diary search, Daily streak log, This week report (Progress aur Profile → Streak, Home par nahi), Ended streaks, Share this week, Get AI read, Coach history, aur custom reminder edit/delete app mein hain. Paywall screen app mein pehle se sahi hai, is queue se hata diya. Eligible user ko store wala trial dikhta hai: iPhone par Try EatAI Pro free / Start free trial, Android par Start for ₹1 (`intro-3day-rupee1`). Demo ki alag paywall sentences app mein mat daalo.
 
 - **Daily free scans nahi hain.** AI Photo, Describe aur Barcode Pro hi hain. Free user ke liye **Food list** free hai. Scan par banner (`scan-lock`): “AI photo scan is part of Pro · Try it free for 3 days. The Food list stays free.” → paywall.
 - Paywall par **Start 3-day free trial** (`paywall-trial`) jo App Store / Play Store deta hai, autopay ke saath. Neeche saaf likha: “Free until <date>. Then ₹X every year, auto-paid by the store. Cancel before then and you pay nothing.” **Pay now** (`paywall-buy`) alag. Trial ek baar hi (`trialUsed`). Guest pehle email deta hai (“Add your email to start your 3-day free trial”), phir paywall par wapas.
@@ -101,7 +104,7 @@ Yeh abhi sirf demo mein hai. Main app mein tab daalo jab demo approve ho. Wajah:
 ### App mein kaise jayega
 
 - Scan sheet mein Food list tab. Home par first-meal card + combo chips. `(tabs)/index.tsx` empty state ko upar lao.
-- Consent decline par Food list par bhejo. Paywall copy mein free scan wajah.
+- Consent decline par Food list par bhejo. Paywall copy mat badlo.
 - Onboarding auto-advance + year input. Training/discovery ko chat setup par chhodo.
 - Bigger text: app mein OS font scale already chalta hai; check karo `allowFontScaling` kahin band to nahi, aur ek in-app toggle socho.
 
@@ -185,7 +188,7 @@ Yeh abhi sirf demo mein hai. Main app mein yeh gates pehle se hain. Demo ab unke
 - App mein baad mein: `POST /v2/scan-food` pehle se image ke saath `userInput` leta hai. `scanImage` abhi sirf file bhejti hai. Optional note ko `userInput` banao. Naya endpoint nahi. Khali note aaj jaisa scan hai.
 - Share meal, progress photo add, Discover, 10 se zyada saved meals, aur hips/chest measurements bhi Pro paywall. Waist, water, aur diary log free rehte hain.
 - Share meal sheet pehle meal aur ek recent chat dikhati hai. Khaali list par “No one to send this to yet”. Free par button `Send to Ananya · Pro` hai, list paywall se replace nahi hoti. Send ke baad usi chat mein meal card. Card sirf wahi meal kholta hai. Under 18 par “Sharing opens at 18”.
-- Chat ke photo button par pehle choice: **Photo** ya **Meal**. Photo sirf picture hai, calories nahi, diary mein nahi, Pro nahi. Meal aaj ki photo, typed text, ya food photo se jaati hai. Normal message meal nahi banta. Naya meal diary mein bhi lagta hai. Free par meal list paywall se replace nahi hoti.
+- Chat ke photo button par pehle choice: **Photo** ya **Meal**. Photo sirf picture hai, calories nahi, diary mein nahi, Pro nahi. Meal aaj ki photo, typed text, ya food photo se jaati hai. Normal message meal nahi banta. Share preview par **Also add to my diary**. Frozen copy mein items bhi. Diary delete se chat/post meal nahi mit-ta. Open par read-only meal details. Free par meal list paywall se replace nahi hoti.
 
 ## Naya — weekly progress, weight trend, photos, report
 
