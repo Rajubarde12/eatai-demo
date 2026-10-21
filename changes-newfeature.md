@@ -1,10 +1,18 @@
 # Demo changes and new features
 
-Last updated: 2026-10-17
+Last updated: 2026-10-21
 
 Main app (`eatai-app` + `eatAi`) mein kuch dalne se pehle yeh file padho. Yahan sirf `eatai-demo` ka hisaab hai: kya naya dikhta hai, kaunsa flow badla, aur kya main app mein pehle se hai.
 
 Demo local browser prototype hai. Sign-in, scan, aur payment simulated hain. Purana saved demo `eatai-demo-v2` key par nahi tikta — refresh naya install hai (`eatai-demo-v3`).
+
+## UI priority (2026-10-21) — shipped screens, food system skip
+
+Food logging app mein done hai. Agli cycles **demo-jaisi UI** un screens par jo already live hain. List: `ui-gaps.md`. Rule (workspace): `.cursor/rules/demo-ui-parity.mdc`.
+
+Naya product (referral, Coach Partner, client group, group meal share, login OTP) tabhi jab user bole. Pehle High UI gaps: chat inbox search+request banner, community Photo bina Pro label, coach hero qualification, shared meal photo on real device.
+
+Accepted: shared meal details app mein diary-jaisi full screen.
 
 ## Naya — Communities 2.0 + Professional Coach chat/client groups
 
