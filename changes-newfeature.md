@@ -18,11 +18,11 @@ Accepted: shared meal details app mein diary-jaisi full screen.
 
 Yeh sirf demo prototype hai. Existing community join/post/moderation ko teen clear levels mein badhaya: **Public Community → Verified Coach Community → Private Client Group**.
 
-**App (2026-10-21):** list demo jaisi hai: hierarchy strip, cover card, type pill, host line. Community screen par coach hero aur feed composer card (Posting to, Text, Photo free, Food log Pro + scan). Food log frozen snapshot; diary opt-in on new scan. Diary se delete post/chat copy nahi hataata. Shared meal details diary jaisi hain. Channels, pinned announcement, 7-day challenge, aur Q&A RSVP hain. Host verified check tab, jab review ho. **Connect with Coach** abhi toast only — permission screen / 1:1 / private client group / Coach Partner abhi nahi.
+**App (2026-10-21):** list demo jaisi hai: hierarchy strip, cover card, type pill, host line. Community screen par coach hero aur feed composer card (Posting to, Text, Photo free, Food log Pro + scan). Food log frozen snapshot; diary opt-in on new scan. Diary se delete post/chat copy nahi hataata. Shared meal details diary jaisi hain. Channels, pinned announcement, 7-day challenge, aur Q&A RSVP hain. Host verified check tab, jab review ho. **Connect with Coach** → Professional Coach permission review + `CoachClientRelationship` API (accept/decline/remove/permissions). 1:1 / private client group / Profile row / Coach Partner abhi nahi.
 
 **Share leftover:** group chat meal share (DM + community food log done).
 
-**Coach product leftover (order):** (1) hero qualification + feed chrome — done (`hostQualification`, sticky title/tabs), (2) Connect → permission review + relationship API, (3) Chat “Professional coaching” 1:1, (4) private client group, (5) Profile My Professional Coach, (6) Coach Partner / referral. AI Coach (daily / Ask coach) pehle se alag aur app mein hai.
+**Coach product leftover (order):** (1) hero qualification + feed chrome — done, (2) Connect → permission review + relationship API — in review, (3) Chat “Professional coaching” 1:1, (4) private client group, (5) Profile My Professional Coach, (6) Coach Partner / referral. AI Coach (daily / Ask coach) pehle se alag aur app mein hai.
 
 - Communities list par hierarchy strip aur card type badges. Public/private communities pehle jaisi; naya seed **Ravi's Healthy Eating** verified Coach Community hai.
 - Coach Community card/screen par verified host, qualification, disclosure (“verified” medical endorsement nahi), channels (All, Announcements, Meals, Questions, Weekly wins), pinned announcement, safe 7-day logging challenge aur live Q&A RSVP.
