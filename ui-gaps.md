@@ -20,12 +20,12 @@ Community food log — done: Scan food = Home/Chat `/scan`. Diary switch scan-re
 
 Food name fallback — done: photo na ho to name-based emoji (home, chat, community, details).
 
-3. **Coach community hero** ← next
-   - Demo: qualification line host name ke neeche; “Verified” tab jab review ho.
-   - App: qualification missing. Host line + verified rule demo se match.
+3. **Coach community hero + feed chrome** — done
+   - `hostQualification` create/settings + hero/About caption. ✓ only when `hostVerified`.
+   - Feed Instagram-like: sticky = title + tabs only; coach intro, channels, composer scroll with posts. Host Connect hide.
 
-4. **Shared meal photo (receiver / real device)**
-   - Stage backend image-keep deploy + real-phone verify. Thumbs ab name emoji fallback use karte hain.
+4. **Shared meal photo (receiver / real device)** — done
+   - Public URLs, keep-on-delete, name emoji fallback. Real-phone verified.
 
 ## Med
 
