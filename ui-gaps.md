@@ -10,22 +10,22 @@ Priority: High pehle. Ek cycle mein ek gap.
 
 ## High
 
-1. **Chat inbox header** (`eatai-app/src/app/(tabs)/chat.tsx`)
-   - Demo: 4+ chats par search **aur** request banner dono. App: search ho to request banner hide.
-   - Demo banner: “N chat request(s)” + “Accept to start, or decline quietly.” App: “N message request(s)” bina caption.
-   - Fix: search + banner saath; copy demo jaisi.
+1. **Chat inbox header** (`eatai-app/src/app/(tabs)/chat.tsx`) — done
+   - Search (4+ chats) aur request banner saath. Copy: “N chat request(s)” + “Accept to start, or decline quietly.”
 
-2. **Community Photo chip** (`community/[id].tsx`)
-   - Demo: Text aur Photo Pro nahi. Sirf Food log `· Pro`.
-   - App: `📷 Photo · Pro` dikhati hai. Label hatao; gate sirf Food log par.
+2. **Community Photo chip** (`community/[id].tsx`) — done
+   - Text aur Photo free. Sirf Food log `· Pro`.
 
-3. **Coach community hero**
+Community food log — done: Scan food = Home/Chat `/scan`. Diary switch scan-result pe (default off). Diary pick par switch nahi.
+
+Food name fallback — done: photo na ho to name-based emoji (home, chat, community, details).
+
+3. **Coach community hero** ← next
    - Demo: qualification line host name ke neeche; “Verified” tab jab review ho.
    - App: qualification missing. Host line + verified rule demo se match.
 
 4. **Shared meal photo (receiver / real device)**
-   - Chat/community thumb blank ho sakti hai jab URL local ho ya diary delete ke baad file mit jaye.
-   - Stage backend image-keep deploy + real-phone verify. Community thumb par chat jaisa load-fail fallback.
+   - Stage backend image-keep deploy + real-phone verify. Thumbs ab name emoji fallback use karte hain.
 
 ## Med
 
